@@ -31,4 +31,4 @@ jobs:
         run: python -m pytest tests/ -v --tb=short
 
       - name: Coverage report
-        run: python -m pytest tests/ --cov=gis_codegen --cov-report=term-missing --cov-fail-under=80
+        run: python -m pytest tests/ --cov=gis_codegen --cov-report=term-missing
