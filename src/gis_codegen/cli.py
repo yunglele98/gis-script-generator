@@ -31,7 +31,7 @@ from gis_codegen.extractor import connect, extract_schema
 from gis_codegen.generator import (
     generate_pyqgis, generate_arcpy,
     generate_folium, generate_kepler, generate_deck,
-    generate_export,
+    generate_export, generate_qgs, generate_pyt,
     VALID_OPERATIONS,
 )
 
@@ -225,7 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen = p.add_argument_group("generation options")
     gen.add_argument(
         "--platform",
-        choices=["pyqgis", "arcpy", "folium", "kepler", "deck", "export"],
+        choices=["pyqgis", "arcpy", "folium", "kepler", "deck", "export", "qgs", "pyt"],
         default=None,
         help="Target platform (required unless --list-layers).",
     )
@@ -323,9 +323,9 @@ def main():
 
     # Step 2: generate
     print(f"[2/2] Generating {args.platform} script ...", file=sys.stderr)
-    _web_platforms = {"folium", "kepler", "deck", "export"}
-    if args.operations and args.platform in _web_platforms:
-        print(f"[warn] --op flags are ignored for web platforms ({args.platform}).",
+    _no_op_platforms = {"folium", "kepler", "deck", "export", "qgs", "pyt"}
+    if args.operations and args.platform in _no_op_platforms:
+        print(f"[warn] --op flags are ignored for {args.platform}.",
               file=sys.stderr)
     elif args.operations:
         print(f"      Operations: {', '.join(args.operations)}", file=sys.stderr)
@@ -337,6 +337,8 @@ def main():
         "kepler":  lambda: generate_kepler(schema, db_config),
         "deck":    lambda: generate_deck(schema, db_config),
         "export":  lambda: generate_export(schema, db_config),
+        "qgs":     lambda: generate_qgs(schema, db_config),
+        "pyt":     lambda: generate_pyt(schema, db_config),
     }
     code = generators[args.platform]()
 

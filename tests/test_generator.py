@@ -6,12 +6,15 @@ from gis_codegen.generator import (
     _arcpy_op_blocks,
     _guess_height_field,
     _pyqgis_op_blocks,
+    _qgs_geom_type,
     generate_arcpy,
     generate_deck,
     generate_export,
     generate_folium,
     generate_kepler,
     generate_pyqgis,
+    generate_pyt,
+    generate_qgs,
     pg_type_to_arcpy,
     pg_type_to_pyqgis,
     safe_var,
@@ -619,3 +622,196 @@ class TestGenerateExport:
         # Only one layer → only mode="w", no mode="a"
         assert 'mode="w"' in code
         assert 'mode="a"' not in code
+
+
+# ---------------------------------------------------------------------------
+# _qgs_geom_type
+# ---------------------------------------------------------------------------
+
+class TestQgsGeomType:
+    @pytest.mark.parametrize("geom_type,expected_name,expected_code", [
+        ("POINT",           "Point",   0),
+        ("MULTIPOINT",      "Point",   0),
+        ("LINESTRING",      "Line",    1),
+        ("MULTILINESTRING", "Line",    1),
+        ("POLYGON",         "Polygon", 2),
+        ("MULTIPOLYGON",    "Polygon", 2),
+        ("GEOMETRY",        "Polygon", 2),  # unknown → polygon fallback
+    ])
+    def test_mapping(self, geom_type, expected_name, expected_code):
+        name, code = _qgs_geom_type(geom_type)
+        assert name == expected_name
+        assert code == expected_code
+
+    def test_case_insensitive(self):
+        name, code = _qgs_geom_type("point")
+        assert name == "Point"
+        assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# generate_qgs
+# ---------------------------------------------------------------------------
+
+class TestGenerateQgs:
+    def test_returns_xml_declaration(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert xml.startswith("<!DOCTYPE qgis")
+
+    def test_qgis_root_element(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert "<qgis " in xml
+        assert "</qgis>" in xml
+
+    def test_project_name_is_dbname(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert f'projectname="{db_config["dbname"]}"' in xml
+
+    def test_epsg4326_project_crs(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert "EPSG:4326" in xml
+
+    def test_both_layers_present(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert "<layername>parcels</layername>" in xml
+        assert "<layername>roads</layername>" in xml
+
+    def test_provider_is_postgres(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert xml.count(">postgres</provider>") == 2
+
+    def test_datasource_contains_host_and_dbname(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert f"host={db_config['host']}" in xml
+        assert f"dbname='{db_config['dbname']}'" in xml
+
+    def test_password_not_in_output(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert db_config["password"] not in xml
+
+    def test_geometry_type_polygon(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        # parcels is MULTIPOLYGON → geometry="Polygon", layerGeometryType 2
+        assert 'geometry="Polygon"' in xml
+        assert "<layerGeometryType>2</layerGeometryType>" in xml
+
+    def test_geometry_type_line(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        # roads is MULTILINESTRING → geometry="Line", layerGeometryType 1
+        assert 'geometry="Line"' in xml
+        assert "<layerGeometryType>1</layerGeometryType>" in xml
+
+    def test_layer_id_deterministic(self, schema, db_config):
+        xml1 = generate_qgs(schema, db_config)
+        xml2 = generate_qgs(schema, db_config)
+        # Extract all layer <id> tags — must be identical across calls
+        import re
+        ids1 = re.findall(r"<id>([^<]+)</id>", xml1)
+        ids2 = re.findall(r"<id>([^<]+)</id>", xml2)
+        assert ids1 == ids2
+        assert len(ids1) == 2
+
+    def test_layer_id_format(self, schema, db_config):
+        import re
+        xml = generate_qgs(schema, db_config)
+        ids = re.findall(r"<id>([^<]+)</id>", xml)
+        for layer_id in ids:
+            # format: {table}_{8 hex chars}
+            assert re.match(r"^[a-z_]+_[0-9a-f]{8}$", layer_id), \
+                f"Unexpected layer id format: {layer_id}"
+
+    def test_srid_per_layer(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        # Both layers have srid=4326 → should appear in SRS blocks
+        assert xml.count("EPSG:4326") >= 2
+
+    def test_primary_key_in_datasource(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert "key='parcel_id'" in xml
+        assert "key='road_id'" in xml
+
+    def test_legend_layer_names(self, schema, db_config):
+        xml = generate_qgs(schema, db_config)
+        assert 'name="parcels"' in xml
+        assert 'name="roads"' in xml
+
+    def test_single_layer_schema(self, single_layer_schema, db_config):
+        xml = generate_qgs(single_layer_schema, db_config)
+        assert "<layername>parcels</layername>" in xml
+        assert "roads" not in xml
+
+    def test_empty_layers(self, db_config):
+        empty_schema = {"database": "test_db", "layer_count": 0, "layers": []}
+        xml = generate_qgs(empty_schema, db_config)
+        assert "<qgis " in xml
+        assert "<maplayer" not in xml
+
+
+# ---------------------------------------------------------------------------
+# generate_pyt
+# ---------------------------------------------------------------------------
+
+class TestGeneratePyt:
+    def test_returns_python_source(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert "class Toolbox:" in code
+        assert "class LoadPostGISLayers:" in code
+
+    def test_toolbox_lists_tool(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert "self.tools = [LoadPostGISLayers]" in code
+
+    def test_six_parameters(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert code.count("arcpy.Parameter(") == 6
+
+    def test_host_default_prefilled(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert f'host.value = "{db_config["host"]}"' in code
+
+    def test_port_default_prefilled(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert f'port.value = "{db_config["port"]}"' in code
+
+    def test_dbname_default_prefilled(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert f'dbname.value = "{db_config["dbname"]}"' in code
+
+    def test_user_default_prefilled(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert f'user.value = "{db_config["user"]}"' in code
+
+    def test_password_not_hardcoded(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert db_config["password"] not in code
+
+    def test_password_param_required(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        # password param must be Required, not Optional
+        assert 'parameterType="Required"' in code
+
+    def test_both_layers_in_execute(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert '"parcels"' in code
+        assert '"roads"' in code
+
+    def test_create_database_connection_called(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert "CreateDatabaseConnection" in code
+
+    def test_add_data_from_path_called(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert "addDataFromPath" in code
+
+    def test_scratch_folder_used(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert "arcpy.env.scratchFolder" in code
+
+    def test_is_licensed_returns_true(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert "def isLicensed(self):" in code
+        assert "return True" in code
+
+    def test_schema_filter_param_optional(self, schema, db_config):
+        code = generate_pyt(schema, db_config)
+        assert 'parameterType="Optional"' in code
