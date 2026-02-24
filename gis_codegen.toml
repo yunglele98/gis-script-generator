@@ -1,0 +1,25 @@
+# gis_codegen.toml — configuration for gis_codegen.py
+#
+# Place this file in:
+#   ./gis_codegen.toml              (project-level, per working directory)
+#   ~/.config/gis_codegen/config.toml  (user-level, applies everywhere)
+#
+# Priority for connection values:
+#   CLI flag > this file > environment variable (PGHOST etc.) > built-in default
+
+[database]
+host     = "localhost"
+port     = 5432
+dbname   = "my_gis_db"
+user     = "postgres"
+# password = "mypassword"   # Prefer PGPASSWORD env var over storing here
+
+[defaults]
+# Pre-set generation options so you don't have to type them every run.
+# All of these are still overridable with CLI flags.
+
+platform      = "pyqgis"    # "pyqgis" or "arcpy"
+schema_filter = "public"    # only extract layers from this PG schema
+no_row_counts = false       # set true to speed up extraction on large DBs
+# output      = "output.py" # uncomment to always write to a file
+# save_schema = "schema.json"
