@@ -1,10 +1,10 @@
 # gis-codegen
 
-Generate ready-to-run Python scripts from a PostGIS database schema.
+Generate ready-to-run GIS scripts and project files from a PostGIS database schema.
 
-Connects to PostGIS, extracts spatial layer metadata, and writes scripts
-for five GIS platforms — or reads an Excel map catalogue and writes one
-script per map entry with auto-selected symbology.
+Connects to PostGIS, extracts spatial layer metadata, and writes scripts or project
+files for eight GIS platforms — or reads an Excel map catalogue and writes one script
+per map entry with auto-selected symbology. A browser-based web UI is also included.
 
 ---
 
@@ -18,6 +18,8 @@ script per map entry with auto-selected symbology.
 | `gis-codegen --platform kepler` | Kepler.gl HTML map |
 | `gis-codegen --platform deck` | pydeck / deck.gl HTML map |
 | `gis-codegen --platform export` | GeoPackage export script |
+| `gis-codegen --platform qgs` | QGIS project file (`.qgs`) — open directly in QGIS |
+| `gis-codegen --platform pyt` | ArcGIS Python Toolbox (`.pyt`) — open in ArcGIS Pro |
 | `gis-catalogue --platform pyqgis` | One PyQGIS script per catalogue map |
 | `gis-catalogue --platform arcpy` | One ArcPy script per catalogue map |
 
@@ -34,14 +36,20 @@ script per map entry with auto-selected symbology.
 ## Installation
 
 ```bash
-# Core package (PyQGIS + ArcPy templates):
+# Core package (PyQGIS, ArcPy, QGS, PYT templates):
 pip install -e .
 
 # With web mapping extras (Folium, Kepler.gl, pydeck):
 pip install -e ".[web]"
 
+# With web UI (Flask):
+pip install -e ".[server]"
+
 # With dev tools (pytest, coverage, openpyxl):
 pip install -e ".[dev]"
+
+# With PostGIS integration tests (requires Docker):
+pip install -e ".[integration]"
 ```
 
 ---
@@ -62,10 +70,31 @@ gis-codegen --platform pyqgis -o load_layers.py
 # 4. Generate an ArcPy script with a buffer operation
 gis-codegen --platform arcpy --op buffer -o analysis.py
 
-# 5. Generate a Kepler.gl web map
+# 5. Generate a QGIS project file (open directly in QGIS)
+gis-codegen --platform qgs -o project.qgs
+
+# 6. Generate an ArcGIS Python Toolbox
+gis-codegen --platform pyt -o loader.pyt
+
+# 7. Generate a Kepler.gl web map
 gis-codegen --platform kepler -o kepler_map.py
 python kepler_map.py                     # -> kepler_map.html
 ```
+
+---
+
+## Web UI
+
+A browser-based form that connects to PostGIS, extracts the schema, and downloads
+the generated file — no command line required.
+
+```bash
+pip install -e ".[server]"
+gis-ui                                   # opens http://localhost:5000
+```
+
+Fill in your connection details, choose a platform, and click **Connect & Generate**.
+The script or project file is returned as a download. The password is never stored.
 
 ---
 
@@ -120,8 +149,8 @@ Extraction:
   --schema-filter S   Only include layers in schema S
 
 Generation:
-  --platform          pyqgis | arcpy | folium | kepler | deck | export
-  --op OPERATION      Add an operation block (repeatable)
+  --platform          pyqgis | arcpy | folium | kepler | deck | export | qgs | pyt
+  --op OPERATION      Add an operation block (repeatable; ignored for qgs/pyt)
   --layer SCHEMA.TABLE  Restrict to one layer (repeatable)
   -o / --output FILE  Write to file (default: stdout)
 ```
@@ -140,6 +169,8 @@ Optional:
   -o / --output-dir DIR   Output directory (default: ./maps/)
   -p / --platform         pyqgis | arcpy (default: pyqgis)
   --host / --port / --dbname / --user
+  --schema FILE           Schema JSON from gis-codegen --save-schema (offline mode)
+  --op OPERATION          Add an operation block to every script (repeatable)
   --list                  Preview filtered maps without writing files
 ```
 
@@ -149,6 +180,8 @@ Inclusion rules: rows where `status` is `have` or `partial`
 ---
 
 ## Operations (`--op`)
+
+Applies to `pyqgis` and `arcpy` platforms only.
 
 ### General (10)
 
@@ -181,13 +214,14 @@ Inclusion rules: rows where `status` is `have` or `partial`
 
 ```bash
 # Install dev dependencies
-pip install -e ".[dev]"
+pip install -e ".[dev,server]"
 
-# Run the full test suite (265 tests, no DB required)
-python -m pytest tests/ -v
+# Run unit tests (no DB or Docker required)
+python -m pytest tests/ -m "not integration" -v --cov=gis_codegen --cov-report=term-missing
 
-# With coverage
-python -m pytest tests/ --cov=gis_codegen --cov-report=term-missing
+# Run PostGIS integration tests (requires Docker)
+pip install -e ".[integration]"
+python -m pytest tests/test_integration.py -v -m integration
 
 # Generate the PDF user guide
 python make_pdf.py
@@ -195,14 +229,16 @@ python make_pdf.py
 
 ### Test suite
 
-| File | Tests | Coverage |
+| File | Tests | What it covers |
 |---|---|---|
-| `test_generator.py` | 140 | `safe_var`, type maps, 15 op blocks × 2 platforms, 6 generators |
+| `test_generator.py` | 173 | `safe_var`, type maps, 15 op blocks × 2 platforms, 8 generators incl. QGS/PYT |
 | `test_catalogue.py` | 108 | Load/filter, 10 renderer blocks, symbology dispatch, both generators |
-| `test_extractor.py` | 34 | `DB_CONFIG`, `fetch_columns`, `fetch_primary_keys`, `extract_schema` |
-| **Total** | **312** | |
+| `test_extractor.py` | 34 | `fetch_columns`, `fetch_primary_keys`, `extract_schema` |
+| `test_app.py` | 11 | Flask routes, form rendering, file download, error handling |
+| `test_integration.py` | 19 | Live PostGIS container via testcontainers (requires Docker) |
+| **Total** | **345** | |
 
-All tests are pure unit tests (mocked connections) and run in under 1 second.
+Unit tests (all except `test_integration.py`) run in under 2 seconds with no database required.
 
 ---
 
@@ -212,14 +248,19 @@ All tests are pure unit tests (mocked connections) and run in under 1 second.
 src/gis_codegen/
     __init__.py       Public API: connect, extract_schema, generate_*
     extractor.py      PostGIS metadata queries
-    generator.py      Code generation (PyQGIS, ArcPy, Folium, Kepler, pydeck)
+    generator.py      Code generation (PyQGIS, ArcPy, Folium, Kepler, pydeck, QGS, PYT)
     catalogue.py      Excel-driven per-map code generation
     cli.py            gis-codegen CLI entry point
+    app.py            Flask web UI (gis-ui entry point)
 tests/
     conftest.py
     test_generator.py
     test_catalogue.py
     test_extractor.py
+    test_app.py
+    test_integration.py
+.github/workflows/
+    ci.yml            Unit + integration CI jobs
 make_pdf.py           Generates GIS_Script_Generator_User_Guide.pdf
 gis_codegen.toml      Example config file
 ```
