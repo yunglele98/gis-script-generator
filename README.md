@@ -17,6 +17,7 @@ script per map entry with auto-selected symbology.
 | `gis-codegen --platform folium` | Folium / Leaflet HTML map |
 | `gis-codegen --platform kepler` | Kepler.gl HTML map |
 | `gis-codegen --platform deck` | pydeck / deck.gl HTML map |
+| `gis-codegen --platform export` | GeoPackage export script |
 | `gis-catalogue --platform pyqgis` | One PyQGIS script per catalogue map |
 | `gis-catalogue --platform arcpy` | One ArcPy script per catalogue map |
 
@@ -119,7 +120,7 @@ Extraction:
   --schema-filter S   Only include layers in schema S
 
 Generation:
-  --platform          pyqgis | arcpy | folium | kepler | deck
+  --platform          pyqgis | arcpy | folium | kepler | deck | export
   --op OPERATION      Add an operation block (repeatable)
   --layer SCHEMA.TABLE  Restrict to one layer (repeatable)
   -o / --output FILE  Write to file (default: stdout)
@@ -196,10 +197,10 @@ python make_pdf.py
 
 | File | Tests | Coverage |
 |---|---|---|
-| `test_generator.py` | 124 | `safe_var`, type maps, 15 op blocks × 2 platforms, 5 generators |
+| `test_generator.py` | 140 | `safe_var`, type maps, 15 op blocks × 2 platforms, 6 generators |
 | `test_catalogue.py` | 108 | Load/filter, 10 renderer blocks, symbology dispatch, both generators |
 | `test_extractor.py` | 34 | `DB_CONFIG`, `fetch_columns`, `fetch_primary_keys`, `extract_schema` |
-| **Total** | **265** | |
+| **Total** | **312** | |
 
 All tests are pure unit tests (mocked connections) and run in under 1 second.
 

@@ -1256,6 +1256,102 @@ def generate_deck(schema: dict, db_config: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# GeoPackage export template
+# ---------------------------------------------------------------------------
+
+def generate_export(schema: dict, db_config: dict) -> str:
+    """
+    Generate a script that exports every spatial layer from PostGIS
+    to a single GeoPackage file using geopandas.
+
+    Requires:  pip install -e ".[web]"   (geopandas + sqlalchemy)
+    """
+    layers = schema.get("layers", [])
+    db     = schema.get("database", db_config.get("dbname", "my_gis_db"))
+    host   = db_config["host"]
+    port   = db_config["port"]
+    dbname = db_config["dbname"]
+    user   = db_config["user"]
+    n      = len(layers)
+
+    lines = [
+        f'"""',
+        f'Auto-generated PostGIS -> GeoPackage export script',
+        f'',
+        f'Database : {db} @ {host}:{port}',
+        f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}',
+        f'Layers   : {n}',
+        f'',
+        f'Install:  pip install geopandas sqlalchemy psycopg2-binary',
+        f'Run:      python <this_file>.py  ->  {dbname}_export.gpkg',
+        f'"""',
+        f'',
+        f'import os',
+        f'import sys',
+        f'from urllib.parse import quote_plus',
+        f'import geopandas as gpd',
+        f'from sqlalchemy import create_engine',
+        f'',
+        f'DB_HOST     = "{host}"',
+        f'DB_PORT     = {port}',
+        f'DB_NAME     = "{dbname}"',
+        f'DB_USER     = "{user}"',
+        f'DB_PASSWORD = os.environ["PGPASSWORD"]',
+        f'OUTPUT_GPKG = f"{{DB_NAME}}_export.gpkg"',
+        f'',
+        f'engine = create_engine(',
+        f'    f"postgresql://{{DB_USER}}:{{quote_plus(DB_PASSWORD)}}'
+        f'@{{DB_HOST}}:{{DB_PORT}}/{{DB_NAME}}"',
+        f')',
+        f'',
+        f'print(f"[export] Writing {{OUTPUT_GPKG}} ({n} layer(s))")',
+        f'_ok = 0',
+        f'',
+    ]
+
+    for i, layer in enumerate(layers):
+        var         = safe_var(layer["table"])
+        table       = layer["table"]
+        schema_name = layer["schema"]
+        geom        = layer["geometry"]
+        row_est     = layer.get("row_count_estimate", -1)
+        rows_hint   = f"~{row_est:,} rows" if row_est >= 0 else "row count unknown"
+        # First layer creates the file; subsequent layers append
+        write_mode  = '"w"' if i == 0 else '"a"'
+
+        lines += [
+            f'# {"=" * 66}',
+            f'# [{i + 1}/{n}] {schema_name}.{table}',
+            f'#     Geometry : {geom["type"]}   SRID: {geom["srid"]}   {rows_hint}',
+            f'# {"=" * 66}',
+            f'print(f"[{i + 1}/{n}] {table} ...", end=" ", flush=True)',
+            f'try:',
+            f'    gdf_{var} = gpd.read_postgis(',
+            f'        \'SELECT * FROM "{schema_name}"."{table}"\',',
+            f'        engine,',
+            f'        geom_col="{geom["column"]}",',
+            f'    )',
+            f'    # CRS is preserved from PostGIS (SRID {geom["srid"]}).',
+            f'    # To reproject: gdf_{var} = gdf_{var}.to_crs(epsg=4326)',
+            f'    gdf_{var}.to_file(OUTPUT_GPKG, layer="{table}", driver="GPKG", mode={write_mode})',
+            f'    print(f"OK  ({{len(gdf_{var})}} rows)")',
+            f'    _ok += 1',
+            f'except Exception as _e:',
+            f'    print(f"FAILED  ({{_e}})", file=sys.stderr)',
+            f'',
+        ]
+
+    lines += [
+        f'engine.dispose()',
+        f'print(f"\\n[DONE] {{_ok}}/{n} layers written to {{OUTPUT_GPKG}}")',
+        f'if _ok < {n}:',
+        f'    sys.exit(1)',
+    ]
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

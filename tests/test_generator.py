@@ -8,6 +8,7 @@ from gis_codegen.generator import (
     _pyqgis_op_blocks,
     generate_arcpy,
     generate_deck,
+    generate_export,
     generate_folium,
     generate_kepler,
     generate_pyqgis,
@@ -532,3 +533,89 @@ class TestGenerateDeck:
         # parcels is MULTIPOLYGON → GeoJsonLayer
         code = generate_deck(schema, db_config)
         assert "GeoJsonLayer" in code
+
+
+# ---------------------------------------------------------------------------
+# generate_export
+# ---------------------------------------------------------------------------
+
+class TestGenerateExport:
+    def test_returns_string(self, schema, db_config):
+        assert isinstance(generate_export(schema, db_config), str)
+
+    def test_geopandas_import(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "import geopandas as gpd" in code
+
+    def test_sqlalchemy_engine(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "create_engine" in code
+
+    def test_pgpassword_env_used(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert 'os.environ["PGPASSWORD"]' in code
+
+    def test_no_hardcoded_password(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert db_config["password"] not in code
+
+    def test_output_gpkg_defined(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "OUTPUT_GPKG" in code
+        assert ".gpkg" in code
+
+    def test_both_layers_exported(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert '"parcels"' in code
+        assert '"roads"' in code
+
+    def test_read_postgis_called_per_layer(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert code.count("read_postgis") == 2
+
+    def test_to_file_gpkg_driver(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert 'driver="GPKG"' in code
+
+    def test_first_layer_write_mode(self, schema, db_config):
+        # First layer must use mode="w" to create the file
+        code = generate_export(schema, db_config)
+        assert 'mode="w"' in code
+
+    def test_second_layer_append_mode(self, schema, db_config):
+        # Subsequent layers must use mode="a" to avoid overwriting
+        code = generate_export(schema, db_config)
+        assert 'mode="a"' in code
+
+    def test_per_layer_try_except(self, schema, db_config):
+        # Each layer wrapped in try/except so one failure doesn't abort
+        code = generate_export(schema, db_config)
+        assert code.count("try:") == 2
+        assert code.count("except Exception") == 2
+
+    def test_engine_disposed(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "engine.dispose()" in code
+
+    def test_sys_exit_on_partial_failure(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "sys.exit(1)" in code
+
+    def test_crs_comment_present(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "to_crs" in code  # commented-out reprojection hint
+
+    def test_db_constants_present(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert f'DB_HOST     = "{db_config["host"]}"' in code
+        assert f'DB_NAME     = "{db_config["dbname"]}"' in code
+
+    def test_srid_in_comment(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "SRID: 4326" in code
+
+    def test_single_layer_schema(self, single_layer_schema, db_config):
+        code = generate_export(single_layer_schema, db_config)
+        # Only one layer → only mode="w", no mode="a"
+        assert 'mode="w"' in code
+        assert 'mode="a"' not in code
