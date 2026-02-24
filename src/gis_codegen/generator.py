@@ -5,6 +5,7 @@ Generates a PyQGIS (standalone) or ArcPy (ArcGIS Pro) script from a schema
 dict produced by gis_codegen.extractor.
 """
 
+import hashlib
 import json
 import sys
 import argparse
@@ -1346,6 +1347,280 @@ def generate_export(schema: dict, db_config: dict) -> str:
         f'print(f"\\n[DONE] {{_ok}}/{n} layers written to {{OUTPUT_GPKG}}")',
         f'if _ok < {n}:',
         f'    sys.exit(1)',
+    ]
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# QGIS Project file (.qgs)
+# ---------------------------------------------------------------------------
+
+def _qgs_geom_type(geom_type: str) -> tuple[str, int]:
+    """Map a PostGIS geometry type to a QGIS geometry name and layerGeometryType code."""
+    gt = geom_type.upper()
+    if "POINT" in gt:
+        return "Point", 0
+    if "LINE" in gt:
+        return "Line", 1
+    return "Polygon", 2
+
+
+def generate_qgs(schema: dict, db_config: dict) -> str:
+    """
+    Generate a QGIS project file (.qgs XML) with all PostGIS layers pre-connected.
+
+    Returns XML string — write to a .qgs file and open directly in QGIS.
+    Password is NOT embedded; QGIS prompts on open.
+    """
+    layers = schema.get("layers", [])
+    host   = db_config["host"]
+    port   = db_config["port"]
+    dbname = db_config["dbname"]
+    user   = db_config["user"]
+
+    layer_elements = []
+    legend_layers  = []
+
+    for layer in layers:
+        table       = layer["table"]
+        schema_name = layer["schema"]
+        qualified   = layer["qualified_name"]
+        geom        = layer["geometry"]
+        geom_col    = geom["column"]
+        geom_type   = geom["type"]
+        srid        = geom["srid"]
+        pks         = layer.get("primary_keys", [])
+        pk          = pks[0] if pks else "id"
+
+        qgs_geom_name, qgs_geom_code = _qgs_geom_type(geom_type)
+        layer_id = f"{table}_{hashlib.md5(qualified.encode()).hexdigest()[:8]}"
+
+        datasource = (
+            f"dbname='{dbname}' host={host} port={port} sslmode=disable "
+            f"key='{pk}' srid={srid} type={qgs_geom_name} "
+            f'table="{schema_name}"."{table}" ({geom_col}) sql='
+        )
+
+        layer_elements.append(
+            f'    <maplayer type="vector" geometry="{qgs_geom_name}" autoRefreshEnabled="0">\n'
+            f'      <id>{layer_id}</id>\n'
+            f'      <datasource>{datasource}</datasource>\n'
+            f'      <layername>{table}</layername>\n'
+            f'      <provider encoding="UTF-8">postgres</provider>\n'
+            f'      <srs>\n'
+            f'        <spatialrefsys>\n'
+            f'          <authid>EPSG:{srid}</authid>\n'
+            f'        </spatialrefsys>\n'
+            f'      </srs>\n'
+            f'      <layerGeometryType>{qgs_geom_code}</layerGeometryType>\n'
+            f'    </maplayer>'
+        )
+
+        legend_layers.append(
+            f'      <legendlayer name="{table}" showFeatureCount="0" '
+            f'checked="Qt::Checked" open="true" drawingOrder="-1">\n'
+            f'        <filegroup open="true" hidden="false">\n'
+            f'          <legendlayerfile isInOverview="0" visible="1" layerid="{layer_id}"/>\n'
+            f'        </filegroup>\n'
+            f'      </legendlayer>'
+        )
+
+    layer_elements_str = "\n".join(layer_elements)
+    legend_layers_str  = "\n".join(legend_layers)
+
+    return (
+        '<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>\n'
+        f'<qgis projectname="{dbname}" version="3.28.0-Firenze">\n'
+        '  <projectCrs>\n'
+        '    <spatialrefsys>\n'
+        '      <authid>EPSG:4326</authid>\n'
+        '    </spatialrefsys>\n'
+        '  </projectCrs>\n'
+        '  <mapcanvas annotationsVisible="1" name="theMapCanvas">\n'
+        '    <units>degrees</units>\n'
+        '    <extent>\n'
+        '      <xmin>-180</xmin>\n'
+        '      <ymin>-90</ymin>\n'
+        '      <xmax>180</xmax>\n'
+        '      <ymax>90</ymax>\n'
+        '    </extent>\n'
+        '    <rotation>0</rotation>\n'
+        '    <destinationsrs>\n'
+        '      <spatialrefsys>\n'
+        '        <authid>EPSG:4326</authid>\n'
+        '      </spatialrefsys>\n'
+        '    </destinationsrs>\n'
+        '    <rendermaptile>0</rendermaptile>\n'
+        '  </mapcanvas>\n'
+        '  <projectlayers>\n'
+        f'{layer_elements_str}\n'
+        '  </projectlayers>\n'
+        '  <legend updateDrawingOrder="true">\n'
+        f'{legend_layers_str}\n'
+        '  </legend>\n'
+        '</qgis>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# ArcGIS Python Toolbox (.pyt)
+# ---------------------------------------------------------------------------
+
+def generate_pyt(schema: dict, db_config: dict) -> str:
+    """
+    Generate an ArcGIS Python Toolbox (.pyt) file.
+
+    Returns Python source — save as <name>.pyt and open in ArcGIS Pro via
+    Insert > Toolbox > Add Python Toolbox.
+    Password is NOT hardcoded; the tool dialog prompts for it.
+    """
+    layers = schema.get("layers", [])
+    host   = db_config["host"]
+    port   = db_config["port"]
+    dbname = db_config["dbname"]
+    user   = db_config["user"]
+    n      = len(layers)
+
+    lines = [
+        '# -*- coding: utf-8 -*-',
+        '"""',
+        'Auto-generated ArcGIS Python Toolbox (.pyt)',
+        f'Database : {dbname} @ {host}:{port}',
+        f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}',
+        f'Layers   : {n}',
+        '',
+        'Open in ArcGIS Pro via Insert > Toolbox > Add Python Toolbox',
+        '"""',
+        '',
+        'import os',
+        'import arcpy',
+        '',
+        '',
+        'class Toolbox:',
+        '    """PostGIS Layer Loader toolbox."""',
+        '',
+        '    def __init__(self):',
+        '        self.label = "PostGIS Loader"',
+        '        self.alias = "postgis_loader"',
+        '        self.tools = [LoadPostGISLayers]',
+        '',
+        '',
+        'class LoadPostGISLayers:',
+        '    """Load all PostGIS layers into the current ArcGIS Pro map."""',
+        '',
+        '    def __init__(self):',
+        '        self.label = "Load PostGIS Layers"',
+        '        self.description = (',
+        '            "Connect to a PostGIS database and add all spatial layers "',
+        '            "to the active map."',
+        '        )',
+        '',
+        '    def getParameterInfo(self):',
+        '        host = arcpy.Parameter(',
+        '            displayName="Host",',
+        '            name="host",',
+        '            datatype="GPString",',
+        '            parameterType="Required",',
+        '            direction="Input",',
+        '        )',
+        f'        host.value = "{host}"',
+        '',
+        '        port = arcpy.Parameter(',
+        '            displayName="Port",',
+        '            name="port",',
+        '            datatype="GPString",',
+        '            parameterType="Required",',
+        '            direction="Input",',
+        '        )',
+        f'        port.value = "{port}"',
+        '',
+        '        dbname = arcpy.Parameter(',
+        '            displayName="Database",',
+        '            name="dbname",',
+        '            datatype="GPString",',
+        '            parameterType="Required",',
+        '            direction="Input",',
+        '        )',
+        f'        dbname.value = "{dbname}"',
+        '',
+        '        user = arcpy.Parameter(',
+        '            displayName="User",',
+        '            name="user",',
+        '            datatype="GPString",',
+        '            parameterType="Required",',
+        '            direction="Input",',
+        '        )',
+        f'        user.value = "{user}"',
+        '',
+        '        password = arcpy.Parameter(',
+        '            displayName="Password",',
+        '            name="password",',
+        '            datatype="GPStringHidden",',
+        '            parameterType="Required",',
+        '            direction="Input",',
+        '        )',
+        '',
+        '        schema_filter = arcpy.Parameter(',
+        '            displayName="Schema Filter (optional)",',
+        '            name="schema_filter",',
+        '            datatype="GPString",',
+        '            parameterType="Optional",',
+        '            direction="Input",',
+        '        )',
+        '',
+        '        return [host, port, dbname, user, password, schema_filter]',
+        '',
+        '    def isLicensed(self):',
+        '        return True',
+        '',
+        '    def updateParameters(self, parameters):',
+        '        pass',
+        '',
+        '    def updateMessages(self, parameters):',
+        '        pass',
+        '',
+        '    def execute(self, parameters, messages):',
+        '        host          = parameters[0].valueAsText',
+        '        port          = parameters[1].valueAsText',
+        '        dbname        = parameters[2].valueAsText',
+        '        user          = parameters[3].valueAsText',
+        '        password      = parameters[4].valueAsText',
+        '        schema_filter = parameters[5].valueAsText',
+        '',
+        '        sde_file = os.path.join(arcpy.env.scratchFolder, "postgis_conn.sde")',
+        '',
+        '        arcpy.management.CreateDatabaseConnection(',
+        '            out_folder_path=arcpy.env.scratchFolder,',
+        '            out_name="postgis_conn.sde",',
+        '            database_platform="POSTGRESQL",',
+        '            instance=host,',
+        '            account_authentication="DATABASE_AUTH",',
+        '            username=user,',
+        '            password=password,',
+        '            save_user_pass="SAVE_USERNAME",',
+        '            database=dbname,',
+        '        )',
+        '',
+        '        aprx    = arcpy.mp.ArcGISProject("CURRENT")',
+        '        act_map = aprx.activeMap',
+        '',
+        '        _tables = [',
+    ]
+
+    for layer in layers:
+        lines.append(f'            ("{layer["schema"]}", "{layer["table"]}"),')
+
+    lines += [
+        '        ]',
+        '        for _schema, _table in _tables:',
+        '            if schema_filter and _schema != schema_filter:',
+        '                continue',
+        r'            _fc = f"{sde_file}\\{dbname}.{_schema}.{_table}"',
+        '            act_map.addDataFromPath(_fc)',
+        '            messages.addMessage(f"Added: {_schema}.{_table}")',
+        '',
+        '        messages.addMessage(f"Done. {len(_tables)} layer(s) processed.")',
     ]
 
     return "\n".join(lines)

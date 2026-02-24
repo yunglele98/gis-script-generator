@@ -20,21 +20,31 @@ web = [
     "keplergl>=0.3",
     "pydeck>=0.9",
 ]
+server = [
+    "flask>=3.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "openpyxl>=3.1",
 ]
+integration = [
+    "testcontainers[postgres]>=4.0",
+]
 
 [project.scripts]
 gis-codegen   = "gis_codegen.cli:main"
 gis-catalogue = "gis_codegen.catalogue:main"
+gis-ui        = "gis_codegen.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require Docker and a live PostGIS container",
+]
 
 [tool.coverage.run]
 omit = ["*/cli.py"]   # CLI entry point requires a live DB; covered by integration tests
