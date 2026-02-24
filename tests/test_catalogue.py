@@ -1,5 +1,6 @@
 """Tests for gis_codegen.catalogue module."""
 
+import json
 import pytest
 from gis_codegen.catalogue import (
     VALID_STATUSES,
@@ -9,6 +10,7 @@ from gis_codegen.catalogue import (
     _arcpy_network_line_block,
     _arcpy_points_polygons_block,
     _arcpy_symbology_block,
+    _best_field,
     _categorized_block,
     _graduated_block,
     _heatmap_block,
@@ -18,6 +20,7 @@ from gis_codegen.catalogue import (
     generate_map_arcpy,
     generate_map_pyqgis,
     load_catalogue,
+    load_schema,
 )
 
 
@@ -606,3 +609,217 @@ class TestGenerateMapArcpy:
         code = generate_map_arcpy(map_entry, db_config)
         assert "qgis" not in code.lower()
         assert "QgsApplication" not in code
+
+
+# ---------------------------------------------------------------------------
+# _best_field  (schema field-name resolver)
+# ---------------------------------------------------------------------------
+
+def _make_layer(columns, pks=None, geom_col="geom"):
+    return {
+        "geometry": {"column": geom_col},
+        "primary_keys": pks or [],
+        "columns": columns,
+    }
+
+
+class TestBestField:
+    def test_returns_value_when_no_layer_info(self):
+        assert _best_field(None) == "value"
+
+    def test_returns_value_when_no_columns(self):
+        assert _best_field(_make_layer([])) == "value"
+
+    def test_picks_integer_for_numeric(self):
+        cols = [{"name": "pop", "data_type": "integer"}]
+        assert _best_field(_make_layer(cols), numeric=True) == "pop"
+
+    def test_picks_double_precision_for_numeric(self):
+        cols = [{"name": "area", "data_type": "double precision"}]
+        assert _best_field(_make_layer(cols), numeric=True) == "area"
+
+    def test_picks_text_for_non_numeric(self):
+        cols = [{"name": "category", "data_type": "text"}]
+        assert _best_field(_make_layer(cols), numeric=False) == "category"
+
+    def test_picks_character_varying_for_non_numeric(self):
+        cols = [{"name": "label", "data_type": "character varying"}]
+        assert _best_field(_make_layer(cols), numeric=False) == "label"
+
+    def test_skips_geom_column(self):
+        cols = [
+            {"name": "geom", "data_type": "integer"},  # geom col with numeric type — skip
+            {"name": "floors", "data_type": "integer"},
+        ]
+        assert _best_field(_make_layer(cols)) == "floors"
+
+    def test_skips_primary_key(self):
+        cols = [
+            {"name": "id", "data_type": "integer"},
+            {"name": "height", "data_type": "double precision"},
+        ]
+        assert _best_field(_make_layer(cols, pks=["id"])) == "height"
+
+    def test_falls_back_to_value_when_no_numeric_match(self):
+        cols = [{"name": "label", "data_type": "text"}]
+        assert _best_field(_make_layer(cols), numeric=True) == "value"
+
+    def test_falls_back_to_value_when_no_text_match(self):
+        cols = [{"name": "floors", "data_type": "integer"}]
+        assert _best_field(_make_layer(cols), numeric=False) == "value"
+
+
+# ---------------------------------------------------------------------------
+# load_schema
+# ---------------------------------------------------------------------------
+
+class TestLoadSchema:
+    def test_returns_dict_keyed_by_table(self, tmp_path):
+        data = {
+            "database": "testdb", "host": "localhost",
+            "layers": [
+                {"table": "parcels", "schema": "public",
+                 "geometry": {"column": "geom"}, "primary_keys": [], "columns": []},
+                {"table": "roads", "schema": "public",
+                 "geometry": {"column": "geom"}, "primary_keys": [], "columns": []},
+            ]
+        }
+        p = tmp_path / "schema.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        result = load_schema(str(p))
+        assert "parcels" in result
+        assert "roads" in result
+
+    def test_layer_dict_preserved(self, tmp_path):
+        layer = {"table": "parcels", "schema": "public",
+                 "geometry": {"column": "geom"}, "primary_keys": ["id"],
+                 "columns": [{"name": "id", "data_type": "integer"}]}
+        data = {"layers": [layer]}
+        p = tmp_path / "schema.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        result = load_schema(str(p))
+        assert result["parcels"]["primary_keys"] == ["id"]
+
+    def test_empty_layers(self, tmp_path):
+        p = tmp_path / "schema.json"
+        p.write_text(json.dumps({"layers": []}), encoding="utf-8")
+        assert load_schema(str(p)) == {}
+
+
+# ---------------------------------------------------------------------------
+# generate_map_pyqgis with ops and layer_info
+# ---------------------------------------------------------------------------
+
+class TestGenerateMapPyqgisOps:
+    @pytest.fixture
+    def m(self, map_entry):
+        return map_entry
+
+    @pytest.fixture
+    def dc(self, db_config):
+        return db_config
+
+    def test_buffer_op_injected(self, m, dc):
+        code = generate_map_pyqgis(m, dc, ops=["buffer"])
+        assert "native:buffer" in code
+
+    def test_dissolve_op_injected(self, m, dc):
+        code = generate_map_pyqgis(m, dc, ops=["dissolve"])
+        assert "native:dissolve" in code
+
+    def test_multiple_ops_all_present(self, m, dc):
+        code = generate_map_pyqgis(m, dc, ops=["buffer", "reproject"])
+        assert "native:buffer" in code
+        assert "native:reprojectlayer" in code
+
+    def test_no_ops_leaves_no_op_code(self, m, dc):
+        code = generate_map_pyqgis(m, dc, ops=[])
+        assert "native:buffer" not in code
+
+    def test_ops_none_leaves_no_op_code(self, m, dc):
+        code = generate_map_pyqgis(m, dc)
+        assert "native:buffer" not in code
+
+    def test_layer_info_enriches_field_hint(self, m, dc):
+        # map_entry has no classification set; layer_info has a numeric column
+        # symbology_type "choroplèthe (dégradé)" -> graduated -> prefer numeric
+        m_no_classif = {**m, "classification": None}
+        layer_info = _make_layer(
+            [{"name": "nb_etages", "data_type": "integer"}], pks=[]
+        )
+        code = generate_map_pyqgis(m_no_classif, dc, layer_info=layer_info)
+        assert '"nb_etages"' in code
+
+    def test_layer_info_not_used_when_classification_set(self, m, dc):
+        # if catalogue already has a classification, it should win
+        m_with = {**m, "classification": "my_field"}
+        layer_info = _make_layer(
+            [{"name": "other_field", "data_type": "integer"}], pks=[]
+        )
+        code = generate_map_pyqgis(m_with, dc, layer_info=layer_info)
+        assert '"my_field"' in code
+
+    def test_op_columns_used_from_layer_info(self, m, dc):
+        layer_info = _make_layer(
+            [{"name": "area_m2", "data_type": "double precision"}], pks=[]
+        )
+        code = generate_map_pyqgis(m, dc, ops=["buffer"], layer_info=layer_info)
+        assert "native:buffer" in code
+
+
+# ---------------------------------------------------------------------------
+# generate_map_arcpy with ops and layer_info
+# ---------------------------------------------------------------------------
+
+class TestGenerateMapArcpyOps:
+    @pytest.fixture
+    def m(self, map_entry):
+        return map_entry
+
+    @pytest.fixture
+    def dc(self, db_config):
+        return db_config
+
+    def test_buffer_op_injected(self, m, dc):
+        code = generate_map_arcpy(m, dc, ops=["buffer"])
+        assert "analysis.Buffer" in code
+
+    def test_dissolve_op_injected(self, m, dc):
+        code = generate_map_arcpy(m, dc, ops=["dissolve"])
+        assert "management.Dissolve" in code
+
+    def test_multiple_ops_all_present(self, m, dc):
+        code = generate_map_arcpy(m, dc, ops=["buffer", "reproject"])
+        assert "analysis.Buffer" in code
+        assert "management.Project" in code
+
+    def test_no_ops_leaves_no_op_code(self, m, dc):
+        code = generate_map_arcpy(m, dc, ops=[])
+        assert "analysis.Buffer" not in code
+
+    def test_ops_none_leaves_no_op_code(self, m, dc):
+        code = generate_map_arcpy(m, dc)
+        assert "analysis.Buffer" not in code
+
+    def test_layer_info_enriches_field_hint(self, m, dc):
+        m_no_classif = {**m, "classification": None}
+        layer_info = _make_layer(
+            [{"name": "nb_etages", "data_type": "integer"}], pks=[]
+        )
+        code = generate_map_arcpy(m_no_classif, dc, layer_info=layer_info)
+        assert '"nb_etages"' in code
+
+    def test_layer_info_not_used_when_classification_set(self, m, dc):
+        m_with = {**m, "classification": "my_field"}
+        layer_info = _make_layer(
+            [{"name": "other_field", "data_type": "integer"}], pks=[]
+        )
+        code = generate_map_arcpy(m_with, dc, layer_info=layer_info)
+        assert '"my_field"' in code
+
+    def test_op_block_inside_else_branch(self, m, dc):
+        # buffer block should appear before aprx.save()
+        code = generate_map_arcpy(m, dc, ops=["buffer"])
+        buf_pos  = code.index("analysis.Buffer")
+        save_pos = code.index("aprx.save()")
+        assert buf_pos < save_pos

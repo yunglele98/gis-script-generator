@@ -8,8 +8,10 @@ Vector layers).
 CLI:
     gis-catalogue --input catalogue.xlsx --output-dir ./maps/
     gis-catalogue --input catalogue.xlsx --platform arcpy --output-dir ./maps_arcpy/
+    gis-catalogue --input catalogue.xlsx --schema schema.json --op buffer
 """
 
+import json
 import os
 import sys
 import argparse
@@ -22,7 +24,12 @@ except ImportError:
     print("[ERROR] openpyxl is required: pip install openpyxl", file=sys.stderr)
     sys.exit(1)
 
-from gis_codegen.generator import safe_var
+from gis_codegen.generator import (
+    safe_var,
+    VALID_OPERATIONS,
+    _pyqgis_op_blocks,
+    _arcpy_op_blocks,
+)
 
 # ---------------------------------------------------------------------------
 # Catalogue loader
@@ -30,6 +37,46 @@ from gis_codegen.generator import safe_var
 
 VALID_STATUSES    = {"have", "partial"}
 RASTER_ONLY_TYPES = {"Raster", "Table"}   # skip if *only* these (no Vector component)
+
+_NUMERIC_TYPES = {
+    "integer", "bigint", "smallint", "double precision",
+    "numeric", "real", "float4", "float8",
+}
+_TEXT_TYPES = {"text", "character varying", "character", "varchar"}
+
+
+def _best_field(layer_info: dict | None, numeric: bool = True) -> str:
+    """
+    Return the most suitable column name from a schema layer dict.
+
+    Skips the geometry column and primary keys. Falls back to 'value'
+    when layer_info is absent or no suitable column is found.
+    """
+    if not layer_info:
+        return "value"
+    geom_col = layer_info.get("geometry", {}).get("column", "geom")
+    pks      = set(layer_info.get("primary_keys", []))
+    want     = _NUMERIC_TYPES if numeric else _TEXT_TYPES
+    for col in layer_info.get("columns", []):
+        name  = col["name"]
+        dtype = col.get("data_type", "")
+        if name == geom_col or name in pks:
+            continue
+        if dtype in want:
+            return name
+    return "value"
+
+
+def load_schema(path: str) -> dict:
+    """
+    Load a schema JSON produced by  gis-codegen --save-schema.
+    Returns a dict keyed by table name for fast lookup.
+    """
+    data   = json.loads(Path(path).read_text(encoding="utf-8"))
+    lookup = {}
+    for layer in data.get("layers", []):
+        lookup[layer["table"]] = layer
+    return lookup
 
 
 def load_catalogue(path: str) -> list[dict]:
@@ -165,7 +212,7 @@ def _symbology_block(var: str, m: dict) -> list[str]:
         if "catégoriel" in stype:
             lines += _categorized_block(var, "type", classif)
         else:
-            lines += _graduated_block(var, "value")
+            lines += _graduated_block(var, classif or "value")
 
     elif "points" in stype or "polygones" in stype:
         lines += _points_polygons_block(var)
@@ -262,7 +309,7 @@ def _arcpy_symbology_block(var: str, m: dict) -> list[str]:
         if "catégoriel" in stype:
             lines += _arcpy_categorized_block(var, "type", classif)
         else:
-            lines += _arcpy_graduated_block(var, "value")
+            lines += _arcpy_graduated_block(var, classif or "value")
 
     elif "points" in stype or "polygones" in stype:
         lines += _arcpy_points_polygons_block(var)
@@ -281,7 +328,9 @@ def _arcpy_symbology_block(var: str, m: dict) -> list[str]:
 # Per-map PyQGIS script generator
 # ---------------------------------------------------------------------------
 
-def generate_map_pyqgis(m: dict, db_config: dict) -> str:
+def generate_map_pyqgis(m: dict, db_config: dict,
+                        ops: list | None = None,
+                        layer_info: dict | None = None) -> str:
     map_id     = m.get("map_id", "M??")
     title      = m.get("title") or m.get("short_name", "")
     short_name = m.get("short_name", "layer")
@@ -367,9 +416,21 @@ def generate_map_pyqgis(m: dict, db_config: dict) -> str:
         f'',
     ]
 
-    # Symbology
-    lines.extend(_symbology_block(var, m))
+    # Symbology — enrich field hint from schema if catalogue classification is blank
+    m_sym = m
+    if layer_info and not m.get("classification"):
+        stype = (m.get("symbology_type") or "").lower()
+        want_numeric = any(k in stype for k in ("choroplèthe", "dégradé", "gradué", "heatmap", "densité"))
+        best = _best_field(layer_info, numeric=want_numeric)
+        if best != "value":
+            m_sym = {**m, "classification": best}
+    lines.extend(_symbology_block(var, m_sym))
     lines.append(f'')
+
+    # Operation blocks (--op)
+    if ops:
+        columns = layer_info.get("columns", []) if layer_info else []
+        lines.extend(_pyqgis_op_blocks(var, short_name, columns, set(ops)))
 
     # Raster note
     if has_raster:
@@ -414,7 +475,9 @@ def generate_map_pyqgis(m: dict, db_config: dict) -> str:
 # Per-map ArcPy script generator
 # ---------------------------------------------------------------------------
 
-def generate_map_arcpy(m: dict, db_config: dict) -> str:
+def generate_map_arcpy(m: dict, db_config: dict,
+                       ops: list | None = None,
+                       layer_info: dict | None = None) -> str:
     map_id      = m.get("map_id", "M??")
     title       = m.get("title") or m.get("short_name", "")
     short_name  = m.get("short_name", "layer")
@@ -521,9 +584,21 @@ def generate_map_arcpy(m: dict, db_config: dict) -> str:
         f'',
     ]
 
-    # Symbology
-    lines.extend(_arcpy_symbology_block(var, m))
+    # Symbology — enrich field hint from schema if catalogue classification is blank
+    m_sym = m
+    if layer_info and not m.get("classification"):
+        stype = (m.get("symbology_type") or "").lower()
+        want_numeric = any(k in stype for k in ("choroplèthe", "dégradé", "gradué", "heatmap", "densité"))
+        best = _best_field(layer_info, numeric=want_numeric)
+        if best != "value":
+            m_sym = {**m, "classification": best}
+    lines.extend(_arcpy_symbology_block(var, m_sym))
     lines.append(f'')
+
+    # Operation blocks (--op)
+    if ops:
+        columns = layer_info.get("columns", []) if layer_info else []
+        lines.extend(_arcpy_op_blocks(var, short_name, columns, set(ops)))
 
     lines += [
         f'    aprx.save()',
@@ -579,6 +654,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port",     default=int(os.environ.get("PGPORT", 5432)), type=int)
     p.add_argument("--dbname",   default=os.environ.get("PGDATABASE", "my_gis_db"))
     p.add_argument("--user",     default=os.environ.get("PGUSER",     "postgres"))
+    p.add_argument("--schema", "-s", metavar="FILE", default=None,
+                   help="Schema JSON from 'gis-codegen --save-schema'. "
+                        "Resolves field names and makes PGPASSWORD optional.")
+    p.add_argument("--op", metavar="OPERATION", action="append", dest="operations",
+                   choices=VALID_OPERATIONS,
+                   help=f"Inject an operation block into every script "
+                        f"({', '.join(VALID_OPERATIONS)}). Repeatable.")
     p.add_argument("--list",     action="store_true",
                    help="Print filtered maps and exit without writing files.")
     return p
@@ -598,8 +680,23 @@ def main():
         print()
         return
 
-    if not os.environ.get("PGPASSWORD"):
-        print("[ERROR] PGPASSWORD environment variable is not set.", file=sys.stderr)
+    # Load optional schema JSON (makes PGPASSWORD optional)
+    schema_lookup: dict = {}
+    if args.schema:
+        schema_lookup = load_schema(args.schema)
+        print(f"[OK] Schema loaded: {len(schema_lookup)} layers from {args.schema}",
+              file=sys.stderr)
+        # Backfill db_config from schema metadata when CLI args are at their defaults
+        schema_raw = json.loads(Path(args.schema).read_text(encoding="utf-8"))
+        if args.host == os.environ.get("PGHOST", "localhost"):
+            args.host   = schema_raw.get("host",     args.host)
+        if args.dbname == os.environ.get("PGDATABASE", "my_gis_db"):
+            args.dbname = schema_raw.get("database", args.dbname)
+
+    if not os.environ.get("PGPASSWORD") and not args.schema:
+        print("[ERROR] PGPASSWORD is not set. "
+              "Either set it or supply --schema to skip the live DB requirement.",
+              file=sys.stderr)
         sys.exit(1)
 
     db_config = {
@@ -609,17 +706,24 @@ def main():
         "user":   args.user,
     }
 
+    ops = args.operations or []
+    if ops:
+        print(f"[OK] Operations: {', '.join(ops)}", file=sys.stderr)
+
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     generator = generate_map_arcpy if args.platform == "arcpy" else generate_map_pyqgis
 
     for m in maps:
-        fname = f"{m['map_id']}_{m['short_name']}.py"
-        fpath = out_dir / fname
-        code  = generator(m, db_config)
+        fname      = f"{m['map_id']}_{m['short_name']}.py"
+        fpath      = out_dir / fname
+        layer_info = schema_lookup.get(m.get("short_name", ""))
+        code       = generator(m, db_config, ops=ops, layer_info=layer_info)
         fpath.write_text(code, encoding="utf-8")
-        print(f"[OK] {fname}", file=sys.stderr)
+        resolved = layer_info is not None
+        print(f"[OK] {fname}{' (schema enriched)' if resolved else ''}",
+              file=sys.stderr)
 
     print(f"\n[DONE] {len(maps)} {args.platform} scripts written to '{out_dir}/'",
           file=sys.stderr)
