@@ -679,7 +679,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main():
+def main() -> None:
     args = _build_parser().parse_args()
 
     maps = load_catalogue(args.input)

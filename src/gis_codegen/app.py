@@ -115,7 +115,7 @@ _GENERATORS = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _form_defaults():
+def _form_defaults() -> dict[str, object]:
     return dict(
         host="localhost",
         port="5432",
@@ -128,7 +128,7 @@ def _form_defaults():
     )
 
 
-def _render_form(**kwargs):
+def _render_form(**kwargs: object) -> str:
     ctx = {**_form_defaults(), **kwargs}
     return render_template_string(_TEMPLATE, **ctx)
 
@@ -138,12 +138,12 @@ def _render_form(**kwargs):
 # ---------------------------------------------------------------------------
 
 @app.route("/")
-def index():
+def index() -> str:
     return _render_form()
 
 
 @app.route("/generate", methods=["POST"])
-def generate():
+def generate() -> Response | tuple[str, int]:
     host          = request.form.get("host", "localhost").strip()
     port_str      = request.form.get("port", "5432").strip()
     dbname        = request.form.get("dbname", "my_gis_db").strip()
@@ -214,7 +214,7 @@ def generate():
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     app.run(host="0.0.0.0", port=5000, debug=False)
 
 
