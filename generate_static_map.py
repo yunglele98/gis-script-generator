@@ -37,6 +37,7 @@ def generate_map():
         # 5. Save Output
         output_file = os.path.join(OUTPUT_DIR, "kensington_static_infrastructure.png")
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close(fig)
         print(f"Map saved to: {output_file}")
         
     except Exception as e:

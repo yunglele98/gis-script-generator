@@ -82,7 +82,7 @@ VALID_OPERATIONS = [
 ]
 
 
-def _pyqgis_op_blocks(var: str, table: str, columns: list, ops: set) -> list[str]:
+def _pyqgis_op_blocks(var: str, table: str, columns: list[dict], ops: set[str]) -> list[str]:
     """Return 4-space-indented lines for each requested PyQGIS operation."""
     lines = []
     first_col = columns[0]["name"] if columns else "field_name"
@@ -313,7 +313,7 @@ def _pyqgis_op_blocks(var: str, table: str, columns: list, ops: set) -> list[str
             f'    _ddp_fc_{var}.setProperty(',
             f'        QgsAbstract3DSymbol.PropertyExtrusionHeight,',
             f'        QgsProperty.fromExpression(',
-            f'            f\'"{{}}" - "{{}}"\'  .format(_ROOF_FIELD_{var}, _BASE_FIELD_{var})',
+            f'            f\'"{{_ROOF_FIELD_{var}}}" - "{{_BASE_FIELD_{var}}}"\'',
             f'        ),',
             f'    )',
             f'    _sym_fc_{var}.setDataDefinedProperties(_ddp_fc_{var})',
@@ -359,7 +359,7 @@ def _pyqgis_op_blocks(var: str, table: str, columns: list, ops: set) -> list[str
     return lines
 
 
-def _arcpy_op_blocks(var: str, table: str, columns: list, ops: set) -> list[str]:
+def _arcpy_op_blocks(var: str, table: str, columns: list[dict], ops: set[str]) -> list[str]:
     """Return 4-space-indented lines for each requested ArcPy operation."""
     lines = []
     first_col = columns[0]["name"] if columns else "field_name"
@@ -653,7 +653,7 @@ def generate_pyqgis(schema: dict, db_config: dict,
         f'DB_PORT     = "{port}"',
         f'DB_NAME     = "{dbname}"',
         f'DB_USER     = "{user}"',
-        f'DB_PASSWORD = "{password}"',
+        f'DB_PASSWORD = os.environ.get("PGPASSWORD", "")  # set PGPASSWORD before running',
         f'',
     ]
 
@@ -782,7 +782,7 @@ def generate_arcpy(schema: dict, db_config: dict,
         f'DB_INSTANCE = "{host},{port}"  # ArcGIS uses "host,port" format',
         f'DB_NAME     = "{dbname}"',
         f'DB_USER     = "{user}"',
-        f'DB_PASSWORD = "{password}"',
+        f'DB_PASSWORD = os.environ.get("PGPASSWORD", "")  # set PGPASSWORD before running',
         f'',
         f'# Create a temporary .sde connection file',
         f'SDE_FOLDER = tempfile.gettempdir()',
@@ -898,14 +898,14 @@ _HEIGHT_HINTS = {
 }
 
 
-def _guess_height_field(columns: list) -> str | None:
+def _guess_height_field(columns: list[dict]) -> str | None:
     for col in columns:
         if col["name"].lower() in _HEIGHT_HINTS:
             return col["name"]
     return None
 
 
-def _db_url_line(host, port, dbname, user, password) -> str:
+def _db_url_line(host: str, port: int, dbname: str, user: str, password: str) -> str:
     return (
         f'DB_URL = ('
         f'f"postgresql://{{DB_USER}}:{{quote_plus(DB_PASSWORD)}}'
@@ -1647,7 +1647,7 @@ def load_schema(path: str) -> tuple[dict, dict]:
     return schema, db_config
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate a PyQGIS or ArcPy script from a PostGIS schema JSON."
     )

@@ -69,6 +69,28 @@ class TestLoadCatalogue:
         assert "todo" not in VALID_STATUSES
         assert "raster" not in VALID_STATUSES
 
+    def test_missing_catalogue_sheet_exits(self, tmp_path):
+        """Excel file without a 'Catalogue' sheet should exit with an error."""
+        import openpyxl
+        wb = openpyxl.Workbook()
+        wb.active.title = "DataDictionary"  # wrong sheet name
+        path = str(tmp_path / "bad.xlsx")
+        wb.save(path)
+        with pytest.raises(SystemExit):
+            load_catalogue(path)
+
+    def test_non_existent_file_exits(self, tmp_path):
+        """A path that does not exist should exit with an error."""
+        with pytest.raises(SystemExit):
+            load_catalogue(str(tmp_path / "no_such_file.xlsx"))
+
+    def test_corrupt_file_exits(self, tmp_path):
+        """A file that is not a valid Excel workbook should exit with an error."""
+        path = tmp_path / "corrupt.xlsx"
+        path.write_bytes(b"this is not an xlsx file")
+        with pytest.raises(SystemExit):
+            load_catalogue(str(path))
+
 
 # ---------------------------------------------------------------------------
 # Individual renderer block builders

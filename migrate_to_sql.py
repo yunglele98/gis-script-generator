@@ -27,7 +27,7 @@ def migrate_data():
             gdf = gpd.read_file(shp)
             # We convert geometry to WKT (Well-Known Text) for a simpler SQLite import 
             # Or use SpatiaLite format if available
-            gdf['geometry_wkt'] = gdf.geometry.apply(lambda x: x.wkt if x else None)
+            gdf['geometry_wkt'] = gdf.geometry.apply(lambda x: x.wkt if x is not None else None)
             df_for_sql = pd.DataFrame(gdf.drop(columns='geometry'))
             df_for_sql.to_sql(table_name, conn, if_exists='replace', index=False)
             print(f"    [OK] {len(gdf)} records imported.")

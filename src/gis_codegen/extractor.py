@@ -15,6 +15,7 @@ import os
 import sys
 import argparse
 import psycopg2
+import psycopg2.extensions
 import psycopg2.extras
 
 
@@ -82,7 +83,7 @@ ORDER BY kcu.ordinal_position;
 """
 
 
-def connect(config: dict):
+def connect(config: dict) -> psycopg2.extensions.connection:
     try:
         conn = psycopg2.connect(**config)
         conn.set_session(readonly=True, autocommit=True)
@@ -92,12 +93,12 @@ def connect(config: dict):
         sys.exit(1)
 
 
-def fetch_spatial_layers(cur) -> list[dict]:
+def fetch_spatial_layers(cur: psycopg2.extensions.cursor) -> list[dict]:
     cur.execute(SPATIAL_LAYERS_SQL)
     return cur.fetchall()
 
 
-def fetch_columns(cur, schema: str, table: str) -> list[dict]:
+def fetch_columns(cur: psycopg2.extensions.cursor, schema: str, table: str) -> list[dict]:
     cur.execute(NON_GEOM_COLUMNS_SQL, (schema, table, schema, table))
     rows = cur.fetchall()
     columns = []
@@ -115,22 +116,24 @@ def fetch_columns(cur, schema: str, table: str) -> list[dict]:
     return columns
 
 
-def fetch_primary_keys(cur, schema: str, table: str) -> list[str]:
+def fetch_primary_keys(cur: psycopg2.extensions.cursor, schema: str, table: str) -> list[str]:
     cur.execute(PRIMARY_KEY_SQL, (schema, table))
     return [row["column_name"] for row in cur.fetchall()]
 
 
-def fetch_row_count_estimate(cur, schema: str, table: str) -> int:
+def fetch_row_count_estimate(cur: psycopg2.extensions.cursor, schema: str, table: str) -> int:
     """Uses pg_class statistics — fast, approximate."""
     try:
         cur.execute(ROW_COUNT_SQL, (schema, table))
         row = cur.fetchone()
         return row["estimate"] if row else -1
-    except Exception:
+    except Exception as exc:
+        print(f"[WARN] Row count estimate failed for {schema}.{table}: {exc}",
+              file=sys.stderr)
         return -1
 
 
-def extract_schema(conn, include_row_counts: bool = True) -> dict:
+def extract_schema(conn: psycopg2.extensions.connection, include_row_counts: bool = True) -> dict:
     layers = []
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         spatial_rows = fetch_spatial_layers(cur)
@@ -171,7 +174,7 @@ def extract_schema(conn, include_row_counts: bool = True) -> dict:
     }
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Extract spatial layer schema from a PostGIS database."
     )
