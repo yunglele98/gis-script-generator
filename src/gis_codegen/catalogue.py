@@ -29,6 +29,8 @@ from gis_codegen.generator import (
     VALID_OPERATIONS,
     _pyqgis_op_blocks,
     _arcpy_op_blocks,
+    generate_qgs,
+    generate_pyt,
 )
 
 # ---------------------------------------------------------------------------
@@ -636,19 +638,109 @@ def generate_map_arcpy(m: dict, db_config: dict,
 
 
 # ---------------------------------------------------------------------------
+# Per-map QGIS project file generator
+# ---------------------------------------------------------------------------
+
+def generate_map_qgs(m: dict, db_config: dict,
+                     ops: list | None = None,
+                     layer_info: dict | None = None) -> str:
+    """
+    Generate a QGIS project file (.qgs) for a single catalogue map entry.
+
+    ops is accepted for API consistency but silently ignored (.qgs has no
+    operation blocks).  Returns XML — write to a .qgs file and open in QGIS.
+    """
+    short_name = m.get("short_name", "layer")
+
+    if layer_info:
+        geom         = layer_info.get("geometry",
+                                      {"type": "GEOMETRY", "srid": 4326, "column": "geom"})
+        primary_keys = layer_info.get("primary_keys", [])
+        columns      = layer_info.get("columns", [])
+    else:
+        geom         = {"type": "GEOMETRY", "srid": 4326, "column": "geom"}
+        primary_keys = []
+        columns      = []
+
+    single_layer_schema = {
+        "database":    db_config.get("dbname", ""),
+        "host":        db_config.get("host", ""),
+        "layer_count": 1,
+        "layers": [{
+            "schema":         "public",
+            "table":          short_name,
+            "qualified_name": f"public.{short_name}",
+            "geometry":       geom,
+            "columns":        columns,
+            "primary_keys":   primary_keys,
+        }],
+    }
+    return generate_qgs(single_layer_schema, db_config)
+
+
+# ---------------------------------------------------------------------------
+# Per-map ArcGIS Python Toolbox generator
+# ---------------------------------------------------------------------------
+
+def generate_map_pyt(m: dict, db_config: dict,
+                     ops: list | None = None,
+                     layer_info: dict | None = None) -> str:
+    """
+    Generate an ArcGIS Python Toolbox (.pyt) for a single catalogue map entry.
+
+    ops is accepted for API consistency but silently ignored (.pyt has no
+    operation blocks).  Returns Python source — save as .pyt and open in
+    ArcGIS Pro via Insert > Toolbox > Add Python Toolbox.
+    """
+    short_name = m.get("short_name", "layer")
+
+    if layer_info:
+        geom         = layer_info.get("geometry",
+                                      {"type": "GEOMETRY", "srid": 4326, "column": "geom"})
+        primary_keys = layer_info.get("primary_keys", [])
+        columns      = layer_info.get("columns", [])
+    else:
+        geom         = {"type": "GEOMETRY", "srid": 4326, "column": "geom"}
+        primary_keys = []
+        columns      = []
+
+    single_layer_schema = {
+        "database":    db_config.get("dbname", ""),
+        "host":        db_config.get("host", ""),
+        "layer_count": 1,
+        "layers": [{
+            "schema":         "public",
+            "table":          short_name,
+            "qualified_name": f"public.{short_name}",
+            "geometry":       geom,
+            "columns":        columns,
+            "primary_keys":   primary_keys,
+        }],
+    }
+    return generate_pyt(single_layer_schema, db_config)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+_NO_OP_PLATFORMS = {"qgs", "pyt"}   # ops silently ignored for these platforms
+_EXT             = {"qgs": ".qgs", "pyt": ".pyt"}   # file extensions
+
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="gis-catalogue",
-        description="Generate one PyQGIS or ArcPy script per map from the Kensington catalogue.",
+        description=(
+            "Generate one script/project file per map from the Kensington catalogue."
+        ),
     )
     p.add_argument("--input",  "-i", required=True, metavar="FILE",
                    help="Path to the catalogue .xlsx file.")
     p.add_argument("--output-dir", "-o", default="maps",
-                   help="Directory to write generated scripts (default: ./maps/).")
-    p.add_argument("--platform", "-p", choices=["pyqgis", "arcpy"], default="pyqgis",
+                   help="Directory to write generated files (default: ./maps/).")
+    p.add_argument("--platform", "-p",
+                   choices=["pyqgis", "arcpy", "qgs", "pyt"], default="pyqgis",
                    help="Target platform (default: pyqgis).")
     p.add_argument("--host",     default=os.environ.get("PGHOST",     "localhost"))
     p.add_argument("--port",     default=int(os.environ.get("PGPORT", 5432)), type=int)
@@ -693,7 +785,9 @@ def main():
         if args.dbname == os.environ.get("PGDATABASE", "my_gis_db"):
             args.dbname = schema_raw.get("database", args.dbname)
 
-    if not os.environ.get("PGPASSWORD") and not args.schema:
+    # qgs/pyt don't embed passwords so PGPASSWORD is not required for them
+    if not os.environ.get("PGPASSWORD") and not args.schema \
+            and args.platform not in _NO_OP_PLATFORMS:
         print("[ERROR] PGPASSWORD is not set. "
               "Either set it or supply --schema to skip the live DB requirement.",
               file=sys.stderr)
@@ -708,15 +802,26 @@ def main():
 
     ops = args.operations or []
     if ops:
-        print(f"[OK] Operations: {', '.join(ops)}", file=sys.stderr)
+        if args.platform in _NO_OP_PLATFORMS:
+            print(f"[WARN] --op is ignored for --platform {args.platform}",
+                  file=sys.stderr)
+        else:
+            print(f"[OK] Operations: {', '.join(ops)}", file=sys.stderr)
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    generator = generate_map_arcpy if args.platform == "arcpy" else generate_map_pyqgis
+    _generators = {
+        "pyqgis": generate_map_pyqgis,
+        "arcpy":  generate_map_arcpy,
+        "qgs":    generate_map_qgs,
+        "pyt":    generate_map_pyt,
+    }
+    generator = _generators[args.platform]
+    ext       = _EXT.get(args.platform, ".py")
 
     for m in maps:
-        fname      = f"{m['map_id']}_{m['short_name']}.py"
+        fname      = f"{m['map_id']}_{m['short_name']}{ext}"
         fpath      = out_dir / fname
         layer_info = schema_lookup.get(m.get("short_name", ""))
         code       = generator(m, db_config, ops=ops, layer_info=layer_info)
@@ -725,7 +830,8 @@ def main():
         print(f"[OK] {fname}{' (schema enriched)' if resolved else ''}",
               file=sys.stderr)
 
-    print(f"\n[DONE] {len(maps)} {args.platform} scripts written to '{out_dir}/'",
+    label = "files" if args.platform in _NO_OP_PLATFORMS else "scripts"
+    print(f"\n[DONE] {len(maps)} {args.platform} {label} written to '{out_dir}/'",
           file=sys.stderr)
 
 

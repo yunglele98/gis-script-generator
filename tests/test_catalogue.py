@@ -19,6 +19,8 @@ from gis_codegen.catalogue import (
     _symbology_block,
     generate_map_arcpy,
     generate_map_pyqgis,
+    generate_map_qgs,
+    generate_map_pyt,
     load_catalogue,
     load_schema,
 )
@@ -823,3 +825,73 @@ class TestGenerateMapArcpyOps:
         buf_pos  = code.index("analysis.Buffer")
         save_pos = code.index("aprx.save()")
         assert buf_pos < save_pos
+
+
+# ---------------------------------------------------------------------------
+# Per-map QGIS project file generator
+# ---------------------------------------------------------------------------
+
+class TestGenerateMapQgs:
+    def test_returns_string(self, map_entry, db_config):
+        assert isinstance(generate_map_qgs(map_entry, db_config), str)
+
+    def test_returns_xml(self, map_entry, db_config):
+        xml = generate_map_qgs(map_entry, db_config)
+        assert xml.startswith("<!DOCTYPE qgis")
+        assert "<qgis " in xml
+
+    def test_project_uses_short_name_as_layer(self, map_entry, db_config):
+        xml = generate_map_qgs(map_entry, db_config)
+        short_name = map_entry["short_name"]
+        assert short_name in xml
+
+    def test_ops_ignored_silently(self, map_entry, db_config):
+        xml_no_ops = generate_map_qgs(map_entry, db_config)
+        xml_with_ops = generate_map_qgs(map_entry, db_config, ops=["buffer"])
+        assert xml_no_ops == xml_with_ops
+
+    def test_layer_info_used_if_provided(self, map_entry, db_config):
+        layer_info = _make_layer(
+            [{"name": "test_col", "data_type": "text"}], pks=[]
+        )
+        xml_with_info = generate_map_qgs(map_entry, db_config, layer_info=layer_info)
+        assert xml_with_info.startswith("<!DOCTYPE qgis")
+
+    def test_layer_info_not_required(self, map_entry, db_config):
+        xml_no_info = generate_map_qgs(map_entry, db_config)
+        assert xml_no_info.startswith("<!DOCTYPE qgis")
+
+
+# ---------------------------------------------------------------------------
+# Per-map ArcGIS Python Toolbox generator
+# ---------------------------------------------------------------------------
+
+class TestGenerateMapPyt:
+    def test_returns_string(self, map_entry, db_config):
+        assert isinstance(generate_map_pyt(map_entry, db_config), str)
+
+    def test_returns_python_source(self, map_entry, db_config):
+        code = generate_map_pyt(map_entry, db_config)
+        assert "class Toolbox:" in code
+        assert "class LoadPostGISLayers:" in code
+
+    def test_project_uses_short_name_as_layer(self, map_entry, db_config):
+        code = generate_map_pyt(map_entry, db_config)
+        short_name = map_entry["short_name"]
+        assert short_name in code
+
+    def test_ops_ignored_silently(self, map_entry, db_config):
+        code_no_ops = generate_map_pyt(map_entry, db_config)
+        code_with_ops = generate_map_pyt(map_entry, db_config, ops=["buffer"])
+        assert code_no_ops == code_with_ops
+
+    def test_layer_info_used_if_provided(self, map_entry, db_config):
+        layer_info = _make_layer(
+            [{"name": "test_col", "data_type": "text"}], pks=[]
+        )
+        code_with_info = generate_map_pyt(map_entry, db_config, layer_info=layer_info)
+        assert "class Toolbox:" in code_with_info
+
+    def test_layer_info_not_required(self, map_entry, db_config):
+        code_no_info = generate_map_pyt(map_entry, db_config)
+        assert "class Toolbox:" in code_no_info

@@ -1,28 +1,37 @@
 # Python
 __pycache__/
 *.py[cod]
-*.egg-info/
-.eggs/
-dist/
+*$py.class
+*.so
+.Python
 build/
+dist/
+*.egg-info/
 
 # Virtual environments
-.venv/
 venv/
 env/
+.venv
 
-# Test / coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Generated outputs (not source)
-maps/
-maps_arcpy/
-*.pdf
-schema.json
-
-# Editor
+# IDE
 .vscode/
 .idea/
 *.swp
+
+# GIS/Data files (large)
+*.shp
+*.dbf
+*.shx
+*.prj
+*.cpg
+*.qix
+*.lyr
+data/raw/
+*.tif
+*.tiff
+*.geojson
+
+# Project specific
+.env
+*.log
+output/temp/
