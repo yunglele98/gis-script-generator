@@ -126,7 +126,9 @@ def fetch_row_count_estimate(cur, schema: str, table: str) -> int:
         cur.execute(ROW_COUNT_SQL, (schema, table))
         row = cur.fetchone()
         return row["estimate"] if row else -1
-    except Exception:
+    except Exception as exc:
+        print(f"[WARN] Row count estimate failed for {schema}.{table}: {exc}",
+              file=sys.stderr)
         return -1
 
 
