@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kensington GIS Project — Process Report</title>
+<style>
+  @media print {
+    body { font-size: 10pt; }
+    .no-break { page-break-inside: avoid; }
+    h2 { page-break-before: always; }
+    h2:first-of-type { page-break-before: avoid; }
+  }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 24px;
+    color: #222;
+    line-height: 1.6;
+  }
+  h1 { font-size: 2rem; color: #1a3a5c; border-bottom: 3px solid #1a3a5c; padding-bottom: 8px; }
+  h2 { font-size: 1.4rem; color: #1a3a5c; border-bottom: 1px solid #b0c4de; padding-bottom: 4px; margin-top: 2em; }
+  h3 { font-size: 1.1rem; color: #2c5f8a; }
+  .meta { color: #666; font-size: 0.9rem; margin-bottom: 2em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9rem; }
+  th { background: #1a3a5c; color: white; padding: 8px 10px; text-align: left; }
+  td { padding: 6px 10px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) td { background: #f5f8fc; }
+  code { background: #f0f4f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+  pre { background: #f0f4f8; padding: 12px 16px; border-radius: 4px; font-size: 0.85em; overflow-x: auto; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; font-weight: bold; }
+  .done { background: #d4edda; color: #155724; }
+  .pending { background: #fff3cd; color: #856404; }
+  .critical { background: #f8d7da; color: #721c24; }
+  .info { background: #e3f2fd; color: #0d47a1; }
+  ul li, ol li { margin-bottom: 4px; }
+  .section-box { border: 1px solid #b0c4de; border-radius: 6px; padding: 16px 20px; margin: 1em 0; background: #f8fbff; }
+  .prompt-box { border: 2px solid #1a3a5c; border-radius: 6px; padding: 20px 24px; margin: 1em 0; background: #f0f6ff; white-space: pre-wrap; font-family: monospace; font-size: 0.88em; }
+</style>
+</head>
+<body>
+
+<h1>Kensington GIS Project — Full Process Report</h1>
+<div class="meta">
+  Generated: 2026-02-24 &nbsp;|&nbsp;
+  Repository: <code>yunglele98/gis-script-generator</code> &nbsp;|&nbsp;
+  CRS Standard: EPSG 2952 (NAD83 / Ontario MTM Zone 10)
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>1. Project Overview</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<p>The <strong>Kensington GIS Project</strong> is a geospatial data analysis and automation system for the Kensington Market and Chinatown neighbourhoods in Toronto, Ontario. It has two distinct components:</p>
+
+<div class="section-box">
+  <h3>Component A — Kensington Data Pipeline</h3>
+  <p>A collection of Python scripts and SQL that ingests, reprojects, and analyses 85+ geospatial layers from open data sources (City of Toronto, Statistics Canada, OpenStreetMap). The pipeline runs end-to-end via <code>BUILD_PROJECT.bat</code> and produces a SQLite database, analytical SQL views, and an HTML intelligence report.</p>
+
+  <h3>Component B — gis-codegen Package (<code>src/gis_codegen</code>)</h3>
+  <p>A properly-packaged Python library (v0.1.0) with a Flask web UI and CLI tools. It connects to a PostGIS database, introspects all spatial layers, and auto-generates ready-to-run PyQGIS, ArcPy, Folium, Kepler, or DeckGL scripts. A catalogue-driven sub-tool (<code>gis-catalogue</code>) reads the Kensington map catalogue Excel file and generates one production script per map entry.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>2. Data Inventory</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<h3>Spatial Layers (85 Shapefiles)</h3>
+<table>
+<tr><th>Category</th><th>Key Layers</th><th>CRS</th></tr>
+<tr><td>01 Administrative Boundaries</td><td>Census Tracts, Dissemination Areas, Kensington-Chinatown AOI, Kensington Market AOI</td><td>WGS84 / 4326</td></tr>
+<tr><td>02 Basemap / Topography</td><td>3D Massing 2025, Building Outlines, OSM Roads, OSM Buildings, Road Network, Edge of Roadway, Sidewalks, Signage, TOPO layers, Water/Waterways, Railways</td><td>Mix: 4326 + 2952</td></tr>
+<tr><td>03 Environmental</td><td>Canopy 2018 (full + Kensington clip), Street Trees ×2, Green Spaces, Green Streets, Land Cover, Natural Heritage Area/Line, TOPO_TREE</td><td>Mix: 4326 + 2952</td></tr>
+<tr><td>04 Infrastructure / Transport</td><td>Bicycle Parking ×2, Bicycle Shops, Cycling Network, Pedestrian Network, Parking Lots, Transit Shelters, Stations, Traffic, Transport POIs</td><td>Mix: 4326 + 2952</td></tr>
+<tr><td>05 Planning / Zoning / Heritage</td><td>Toronto Zoning + HEIGHT/LOT/POLICY/CATEGORIES, Cadastral Parcels, Heritage Register, Heritage Conservation Districts, Property Boundaries, Solar Map, Land Use OSM, Business Improvement Areas</td><td>Mix: 4326 + 2952</td></tr>
+<tr><td>06 Socio-Economic / Housing</td><td>Community Housing, Health Services, Schools ×2 (TDSB, TCDSB), Residential Areas/Buildings, Places/POFW/POIs (OSM)</td><td>Mix: 4326 + 2952</td></tr>
+<tr><td>07 Commercial / Economy</td><td>Commercial Areas/Buildings, Commercial Utilities, Employment Survey 2025 (by DA + overall)</td><td>Mix: 4326 + 2952</td></tr>
+</table>
+
+<h3>Attribute / Tabular Data (42 CSVs)</h3>
+<table>
+<tr><th>File</th><th>Content</th></tr>
+<tr><td>CensusProfile2021 (×2)</td><td>StatCan 2021 Census profiles for Kensington-Chinatown DAs</td></tr>
+<tr><td>neighbourhood-profiles-2021-158-model_kensington_chinatown.csv</td><td>Neighbourhood profile data</td></tr>
+<tr><td>Cleared_Building_Permits_since_2017.csv</td><td>~250k building permit records city-wide since 2017</td></tr>
+<tr><td>Apartment_Building_Registration_Data.csv</td><td>MRAB apartment registration data</td></tr>
+<tr><td>Business_licences_data.csv</td><td>Toronto business licence registry</td></tr>
+<tr><td>Hate_Crimes_Open_Data.csv</td><td>Toronto Police hate crime data</td></tr>
+<tr><td>Climate_Variables.csv</td><td>Local climate variables</td></tr>
+<tr><td>Social_and_Affordable_Housing.csv</td><td>Social housing inventory</td></tr>
+<tr><td>Parking_Occupancy.csv</td><td>Parking occupancy data</td></tr>
+<tr><td>ZONING_*.csv (×5)</td><td>Zoning attribute tables</td></tr>
+<tr><td>*_fields.csv (×15)</td><td>Field schema documentation for each shapefile</td></tr>
+</table>
+
+<h3>PostGIS SQL Files (29 in DATA/PostGIS_SQL + 2 at root)</h3>
+<p>Include: dissemination areas with full WGS84 geometry, ruelles/alleys, addresses, building permits, hate crimes, climate variables, business incubation data (geocoded to MTM10), and the master import script (<code>master_postgis_import.sql</code>).</p>
+
+<h3>GeoJSON Files (11)</h3>
+<p>OSM extracts: <code>amenity</code>, <code>building</code>, <code>craft</code>, <code>healthcare</code>, <code>historic</code>, <code>leisure</code>, <code>office</code>, <code>reseaucyclable</code>, <code>ruelles</code>, <code>shop</code>, <code>Neighbourhoods_-_4326</code>.</p>
+
+<h3>GTFS Transit Data</h3>
+<p>Full GTFS feed: <code>agency.txt</code>, <code>calendar.txt</code>, <code>routes.txt</code>, <code>shapes.txt</code>, <code>stop_times.txt</code>, <code>stops.txt</code>, <code>trips.txt</code>.</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>3. Process Followed in This Chat</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<h3>3.1 Initial Analysis</h3>
+<p>Claude Code analysed the full contents of <code>C:\GDB</code>, reading all Python scripts, SQL files, documentation, and the directory structure. 14 distinct bugs and structural issues were identified across 4 categories: critical runtime bugs, script-level bugs, architecture issues, and documentation inconsistencies.</p>
+
+<h3>3.2 Bug Fixes Applied</h3>
+<div class="no-break">
+<table>
+<tr><th>#</th><th>File</th><th>Fix</th><th>Category</th></tr>
+<tr><td>1</td><td><code>BUILD_PROJECT.bat</code></td><td>Corrected 4 script paths from <code>03_RESOURCES\Tools_Installers\script\</code> to project root — pipeline was completely broken</td><td><span class="badge critical">Critical</span></td></tr>
+<tr><td>2</td><td><code>create_kensington_map.py</code></td><td>Rewrote entirely — file was saved with embedded <code>cat -n</code> line numbers causing SyntaxError; fixed hardcoded <code>D:/KensingtonExtraData</code> path to project-relative paths</td><td><span class="badge critical">Critical</span></td></tr>
+<tr><td>3</td><td><code>generate_dashboard.py</code></td><td>Fixed CSS <code>max_width</code> → <code>max-width</code> (both <code>.container</code> and <code>img</code>); added <code>os.makedirs</code> before file write</td><td><span class="badge critical">Critical</span></td></tr>
+<tr><td>4</td><td><code>qgis_master_setup.py</code></td><td>Fixed entry point guard <code>__console__</code> → <code>__main__</code> (function never ran)</td><td><span class="badge critical">Critical</span></td></tr>
+<tr><td>5</td><td><code>reproject_to_mtm10.py</code></td><td>Replaced fragile <code>"2952" in file_path</code> string test with <code>gdf.crs.to_epsg() == 2952</code>; added <code>os.makedirs(WORKING_DIR)</code></td><td><span class="badge pending">Script</span></td></tr>
+<tr><td>6</td><td><code>migrate_to_sql.py</code></td><td>Added <code>os.makedirs</code> for DB directory; added <code>conn.commit()</code> before close</td><td><span class="badge pending">Script</span></td></tr>
+<tr><td>7</td><td><code>generate_static_map.py</code></td><td>Removed unused dead variable <code>CRS_WGS84 = "EPSG:4326"</code></td><td><span class="badge info">Minor</span></td></tr>
+<tr><td>8</td><td><code>generate_interactive_map.py</code></td><td>Updated deprecated Shapely 2.0 API: <code>unary_union</code> → <code>union_all()</code></td><td><span class="badge pending">Script</span></td></tr>
+<tr><td>9</td><td><code>create_analytical_views.py</code></td><td>Removed <code>LIMIT 20</code> from <code>CREATE VIEW</code> definition (belongs in queries)</td><td><span class="badge pending">Script</span></td></tr>
+<tr><td>10</td><td><code>TOPOLOGY_RULES.md</code></td><td>Fixed typo: <code>eproject_to_mtm10.py</code> → <code>reproject_to_mtm10.py</code></td><td><span class="badge info">Docs</span></td></tr>
+<tr><td>11</td><td><code>QC_LOG.md</code></td><td>Fixed same eproject typo; fixed <code>rc_setup_gdb</code> / <code>rc_batch_import</code> / <code>rc_topology_builder</code> → <code>arc_</code> prefix; <code>rcpy_scripts</code> → <code>arcpy_scripts</code></td><td><span class="badge info">Docs</span></td></tr>
+<tr><td>12</td><td><code>reseau_routier.sql</code></td><td>Renamed file → <code>road_network.sql</code>; renamed French table <code>reseau_routier</code> → <code>road_network</code> inside the file</td><td><span class="badge info">Standard</span></td></tr>
+<tr><td>13</td><td><code>Tree_Perc_Ash_Catcher.py</code></td><td>Moved to <code>misc/</code> — unrelated Fusion 360 CAD script</td><td><span class="badge info">Structure</span></td></tr>
+<tr><td>14</td><td><code>requirements.txt</code></td><td>Created with: geopandas, pandas, matplotlib, folium, shapely, pyproj</td><td><span class="badge info">New</span></td></tr>
+</table>
+</div>
+
+<h3>3.3 Git Workflow</h3>
+<ol>
+  <li>Initialised git repository at <code>C:\GDB</code> (none existed)</li>
+  <li>Created <code>.gitignore</code> excluding shapefiles (.shp/.dbf/.shx/etc.), GDB files, CSVs, SQL data dumps (487MB), installers (.exe), and other binaries</li>
+  <li>Remote added: <code>https://github.com/yunglele98/gis-script-generator.git</code></li>
+  <li>Resolved conflicts with existing remote README via rebase</li>
+  <li>Removed <code>road_network.sql</code> from tracking after discovering it was 487MB (exceeds GitHub 100MB limit); added <code>*.sql</code> to <code>.gitignore</code></li>
+  <li>History squashed to single clean commit <code>d2125b3</code> to eliminate large blob from object store</li>
+  <li>Feature branch <code>fix/project-cleanup</code> created; master reset; PR #2 opened, reviewed, and merged</li>
+  <li>Latest pulled — local master now at merge commit <code>8a9c52e</code></li>
+</ol>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>4. Current Project State</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<div class="section-box">
+<h3>What is Committed and Working</h3>
+<table>
+<tr><th>Item</th><th>Status</th></tr>
+<tr><td>All 14 bug fixes applied</td><td><span class="badge done">Done</span></td></tr>
+<tr><td>BUILD_PROJECT.bat pipeline</td><td><span class="badge done">Runnable</span></td></tr>
+<tr><td>gis-codegen package (src/ + tests/)</td><td><span class="badge done">Committed</span></td></tr>
+<tr><td>pyproject.toml with full dep spec</td><td><span class="badge done">Done</span></td></tr>
+<tr><td>GitHub repo: gis-script-generator</td><td><span class="badge done">Pushed + Merged</span></td></tr>
+<tr><td>.gitignore protecting large data files</td><td><span class="badge done">Done</span></td></tr>
+</table>
+
+<h3>What Needs to Happen Next</h3>
+<table>
+<tr><th>Task</th><th>Priority</th><th>Detail</th></tr>
+<tr><td>Fix PENDING_REPROJECTION_LIST.txt paths</td><td><span class="badge critical">High</span></td><td>80 paths reference <code>C:\Users\liam1\KENSINGTON\01_SOURCE\...</code> — must be updated to <code>C:\GDB\</code> then reproject_to_mtm10.py can run</td></tr>
+<tr><td>Run reproject_to_mtm10.py</td><td><span class="badge critical">High</span></td><td>Requires geopandas (Anaconda/Miniforge). 80 WGS84 layers need reprojection to EPSG:2952 → <code>02_WORKING\01_MTM10_STAGED_SHP\</code></td></tr>
+<tr><td>Install &amp; configure PostgreSQL + PostGIS</td><td><span class="badge critical">High</span></td><td>postgresql installer is in C:\GDB root. Required for gis-codegen and master_postgis_import.sql. Default: localhost:5432</td></tr>
+<tr><td>Load master_postgis_import.sql into PostgreSQL</td><td><span class="badge critical">High</span></td><td>Loads all geometry tables (dissemination areas, alleys, addresses, permits, etc.)</td></tr>
+<tr><td>Run migrate_to_sql.py</td><td><span class="badge pending">Medium</span></td><td>Populates SQLite with shapefile + CSV data for the dashboard pipeline</td></tr>
+<tr><td>Run create_analytical_views.py + generate_dashboard.py</td><td><span class="badge pending">Medium</span></td><td>Produces the BI HTML report</td></tr>
+<tr><td>Install gis-codegen: <code>pip install -e ".[server,dev]"</code></td><td><span class="badge pending">Medium</span></td><td>Installs Flask web UI + test dependencies. Run tests: <code>pytest tests/ -m "not integration"</code></td></tr>
+<tr><td>Run gis-ui / gis-codegen CLI against PostGIS</td><td><span class="badge pending">Medium</span></td><td>Connect to populated PostGIS DB → generate PyQGIS/ArcPy scripts for all 85 layers</td></tr>
+<tr><td>Run gis-catalogue against map catalogue Excel</td><td><span class="badge pending">Medium</span></td><td>Reads kensington_market_map_catalogue_TP2 (2).xlsx → generates one script per map entry with proper symbology</td></tr>
+<tr><td>Add src/ + tests/ to git + CI</td><td><span class="badge info">Enhancement</span></td><td>gis-codegen source is committed but no GitHub Actions workflow exists yet. Add pytest CI.</td></tr>
+<tr><td>Update requirements.txt</td><td><span class="badge info">Enhancement</span></td><td>Current requirements.txt covers data pipeline only. gis-codegen deps are in pyproject.toml — merge or cross-reference.</td></tr>
+<tr><td>GTFS integration</td><td><span class="badge info">Future</span></td><td>agency/routes/stops/trips TXT files present — can feed a transit layer in PyQGIS or PostGIS</td></tr>
+</table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>5. Architecture Diagram</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<pre>
+C:\GDB (project root — git tracked: scripts, docs, config)
+│
+├── 01_SOURCE/          ← Raw data (READ-ONLY, git-ignored)
+│   ├── 01_Administrative_Boundaries/   (WGS84)
+│   ├── 02_Basemap_Topography/          (mix WGS84 + EPSG:2952)
+│   ├── 03_Environmental/
+│   ├── 04_Infrastructure_Transportation/
+│   ├── 05_Planning_Zoning_Heritage/
+│   ├── 06_SocioEconomic_Housing/
+│   └── 07_Commercial_Economy/
+│
+├── 02_WORKING/         ← Generated outputs (git-ignored)
+│   ├── 01_MTM10_STAGED_SHP/    ← ⚠ EMPTY — reproject_to_mtm10.py not yet run
+│   ├── 04_SQL_DATABASE/        ← ⚠ EMPTY — migrate_to_sql.py not yet run
+│   │   └── KENSINGTON_PROD.sqlite
+│   ├── 03_MAP_OUTPUTS/
+│   └── 05_ANALYSIS_OUTPUTS/
+│
+├── DATA-20260223T174350Z-1-001/DATA/   (git-ignored)
+│   ├── PostGIS_SQL/    ← 27 SQL files for PostGIS import
+│   └── master_postgis_import.sql   ← ⚠ NOT yet loaded to PostgreSQL
+│
+├── src/gis_codegen/    ← Python package (git-tracked)
+│   ├── extractor.py    ← connects to PostGIS, extracts schema
+│   ├── generator.py    ← generates PyQGIS/ArcPy/Folium/Kepler/DeckGL
+│   ├── catalogue.py    ← reads map catalogue Excel, generates per-map scripts
+│   ├── app.py          ← Flask web UI
+│   └── cli.py          ← CLI entry point
+│
+├── tests/              ← pytest suite (unit + integration via testcontainers)
+│
+├── BUILD_PROJECT.bat   ← Pipeline: reproject → SQL → views → dashboard
+├── pyproject.toml      ← gis-codegen package spec
+└── requirements.txt    ← data pipeline deps
+
+EXECUTION FLOW:
+  reproject_to_mtm10.py
+        ↓ (outputs 80+ _MTM10.shp to 02_WORKING/01_MTM10_STAGED_SHP/)
+  migrate_to_sql.py
+        ↓ (loads SHPs + CSVs into KENSINGTON_PROD.sqlite)
+  create_analytical_views.py
+        ↓ (SQL views: bicycle parking density, permit types)
+  generate_dashboard.py
+        ↓ → 02_WORKING/05_ANALYSIS_OUTPUTS/Kensington_Report.html
+
+  SEPARATELY (PostGIS):
+  psql → master_postgis_import.sql
+        ↓ (loads geometry tables with ST_GeomFromGeoJSON)
+  gis-codegen CLI / gis-ui (Flask)
+        ↓ (introspects PostGIS schema)
+        → generates PyQGIS / ArcPy / Folium scripts per layer
+</pre>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>6. gis-codegen Package Reference</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<table>
+<tr><th>CLI Command</th><th>Description</th><th>Key Options</th></tr>
+<tr><td><code>gis-codegen</code></td><td>Connect to PostGIS, extract schema, generate script</td><td><code>--platform pyqgis|arcpy|folium|kepler|deck|export|qgs|pyt</code></td></tr>
+<tr><td><code>gis-catalogue</code></td><td>Read map catalogue Excel, generate one script per map</td><td><code>--input catalogue.xlsx --platform pyqgis --op buffer</code></td></tr>
+<tr><td><code>gis-ui</code></td><td>Start Flask web UI on http://localhost:5000</td><td>—</td></tr>
+</table>
+
+<h3>Supported Output Platforms</h3>
+<ul>
+  <li><code>pyqgis</code> — Standalone PyQGIS script with PostGIS data source URI</li>
+  <li><code>arcpy</code> — ArcPy script with SDE connection file</li>
+  <li><code>folium</code> — Interactive Leaflet web map (Python)</li>
+  <li><code>kepler</code> — KeplerGL map (Python)</li>
+  <li><code>deck</code> — DeckGL map (Python)</li>
+  <li><code>export</code> — Data export script (CSV/GeoJSON)</li>
+  <li><code>qgs</code> — QGIS project file (.qgs)</li>
+  <li><code>pyt</code> — ArcGIS Python Toolbox (.pyt)</li>
+</ul>
+
+<h3>Install</h3>
+<pre>pip install -e ".[server,dev]"          # Flask UI + dev/test deps
+pip install -e ".[server,dev,web]"      # + Folium/Kepler/DeckGL
+pip install -e ".[integration]"         # + testcontainers for live DB tests</pre>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>7. Immediate Next Steps (Ordered)</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<ol>
+  <li><strong>Environment Setup</strong> — Install Miniforge3 (installer in C:\GDB root), create a conda environment with geopandas, then run <code>pip install -e ".[server,dev]"</code> from C:\GDB.</li>
+
+  <li><strong>Fix PENDING_REPROJECTION_LIST.txt</strong> — Update the 80 source paths from <code>C:\Users\liam1\KENSINGTON\01_SOURCE\</code> to <code>C:\GDB\</code> (or update <code>reproject_to_mtm10.py</code> to scan the flat <code>C:\GDB</code> root directly).</li>
+
+  <li><strong>Run Data Pipeline</strong> — Execute <code>BUILD_PROJECT.bat</code> from C:\GDB (or step-by-step: reproject → migrate → views → dashboard).</li>
+
+  <li><strong>PostgreSQL Setup</strong> — Install PostgreSQL (installer in C:\GDB root), enable PostGIS extension, then load <code>master_postgis_import.sql</code> via psql or pgAdmin.</li>
+
+  <li><strong>Run gis-ui</strong> — Start Flask app (<code>gis-ui</code>), connect to the populated PostGIS database, select platform (PyQGIS or ArcPy), download generated scripts.</li>
+
+  <li><strong>Run gis-catalogue</strong> — Point at <code>kensington_market_map_catalogue_TP2 (2).xlsx</code> to generate per-map scripts for all catalogue entries.</li>
+
+  <li><strong>Add GitHub Actions CI</strong> — Add <code>.github/workflows/ci.yml</code> to run <code>pytest tests/ -m "not integration"</code> on every push.</li>
+</ol>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>8. Continuation Prompt</h2>
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<p>Use the following prompt to continue this project in a new Claude Code session:</p>
+
+<div class="prompt-box">
+You are continuing work on the Kensington GIS Project, a geospatial analysis and script-generation system for Kensington Market and Chinatown, Toronto.
+
+REPOSITORY: https://github.com/yunglele98/gis-script-generator
+LOCAL PATH: C:\GDB
+CRS STANDARD: EPSG 2952 (NAD83 / Ontario MTM Zone 10)
+CURRENT BRANCH: master (merge commit 8a9c52e)
+
+PROJECT HAS TWO COMPONENTS:
+
+1. DATA PIPELINE (root-level scripts):
+   - reproject_to_mtm10.py  — reprojects 85 WGS84 shapefiles to EPSG:2952
+   - migrate_to_sql.py      — loads SHPs + CSVs into SQLite
+   - create_analytical_views.py / generate_dashboard.py — BI reporting
+   - BUILD_PROJECT.bat      — one-click pipeline runner
+
+2. gis-codegen PACKAGE (src/gis_codegen/, tests/):
+   - Flask web UI (gis-ui on localhost:5000)
+   - CLI: gis-codegen, gis-catalogue
+   - Connects to PostGIS, introspects schema, generates PyQGIS/ArcPy/Folium/Kepler/DeckGL scripts
+   - Map catalogue tool: reads Excel → generates one script per map entry
+   - pyproject.toml: name=gis-codegen, version=0.1.0
+
+DATA INVENTORY (all in C:\GDB, git-ignored except code):
+   - 85 shapefiles across 7 thematic categories
+   - 42 CSVs (census, permits, business licences, hate crimes, etc.)
+   - 11 GeoJSON files (OSM extracts)
+   - GTFS transit feed (agency/routes/stops/trips .txt files)
+   - 29 PostGIS SQL files in DATA-20260223T174350Z-1-001/DATA/PostGIS_SQL/
+   - master_postgis_import.sql (full geometry import, ~500MB, NOT yet loaded)
+
+COMPLETED IN PREVIOUS SESSION:
+   - Fixed 14 bugs (critical: broken BAT paths, corrupted map script,
+     CSS typo, broken QGIS entry point guard; script: CRS filter,
+     makedirs, deprecated Shapely API, LIMIT in VIEW, missing commit)
+   - Fixed documentation typos in TOPOLOGY_RULES.md and QC_LOG.md
+   - Renamed reseau_routier.sql → road_network.sql (English standard)
+   - Moved unrelated Fusion360 script to misc/
+   - Created requirements.txt and .gitignore
+   - Initialised git, pushed to GitHub, PR #2 merged
+
+PENDING (priority order):
+   1. PENDING_REPROJECTION_LIST.txt has 80 paths pointing to
+      C:\Users\liam1\KENSINGTON\01_SOURCE\ — need updating to C:\GDB\
+      (or update reproject_to_mtm10.py to scan C:\GDB root directly)
+   2. Set up Python environment: Miniforge3 installer is at C:\GDB\Miniforge3-26.1.0-0-Windows-x86_64.exe
+   3. Run the BUILD_PROJECT.bat data pipeline
+   4. Install PostgreSQL (installer at C:\GDB\postgresql-18.2-1-windows-x64.exe),
+      load master_postgis_import.sql
+   5. Install gis-codegen: pip install -e ".[server,dev]" from C:\GDB
+   6. Run gis-ui / gis-codegen against the PostGIS database
+   7. Run gis-catalogue against kensington_market_map_catalogue_TP2 (2).xlsx
+   8. Add GitHub Actions CI for pytest (tests/conftest.py, test_extractor.py,
+      test_generator.py, test_catalogue.py, test_app.py — no Docker needed;
+      test_integration.py requires testcontainers + Docker)
+
+KNOWN ARCHITECTURE NOTE:
+   - Dual DB backends exist: SQLite (migrate_to_sql.py) for the dashboard,
+     PostGIS (master_postgis_import.sql + gis-codegen) for spatial analysis.
+     These serve different purposes and are intentionally separate.
+
+Start by pulling latest: git pull origin master
+Then ask which task to tackle first.
+</div>
+
+</body>
+</html>

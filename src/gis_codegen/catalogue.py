@@ -86,7 +86,20 @@ def load_catalogue(path: str) -> list[dict]:
     Read Catalogue sheet, return map dicts for Vector layers with
     status=have or status=partial.
     """
-    wb   = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception as exc:
+        print(f"[ERROR] Cannot open catalogue file '{path}': {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if "Catalogue" not in wb.sheetnames:
+        print(
+            f"[ERROR] Worksheet 'Catalogue' not found in '{path}'.\n"
+            f"        Available sheets: {wb.sheetnames}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     ws   = wb["Catalogue"]
     rows = list(ws.iter_rows(values_only=True))
     headers = rows[0]
@@ -758,7 +771,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main():
+def main() -> None:
     args = _build_parser().parse_args()
 
     maps = load_catalogue(args.input)

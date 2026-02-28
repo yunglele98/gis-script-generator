@@ -1,0 +1,10 @@
+# Dependencies for the Kensington data-pipeline scripts (root-level *.py).
+# These are NOT part of the gis-codegen package (see pyproject.toml for that).
+#
+# Install with:  pip install -r requirements.txt
+geopandas>=0.14
+pandas>=2.0
+matplotlib>=3.8
+folium>=0.16
+shapely>=2.0
+pyproj>=3.6

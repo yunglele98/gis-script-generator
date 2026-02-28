@@ -26,6 +26,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
+from types import ModuleType
 
 from gis_codegen.extractor import connect, extract_schema
 from gis_codegen.generator import (
@@ -40,7 +41,7 @@ from gis_codegen.generator import (
 # TOML loader — stdlib tomllib (3.11+) with tomli fallback
 # ---------------------------------------------------------------------------
 
-def _load_toml_module():
+def _load_toml_module() -> ModuleType | None:
     try:
         import tomllib
         return tomllib
@@ -65,7 +66,7 @@ def load_toml(path: Path) -> dict:
         )
         sys.exit(1)
     with open(path, "rb") as f:
-        return TOMLLIB.loads(f.read().decode())
+        return TOMLLIB.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ def resolve_db_config(cli_args: argparse.Namespace, config: dict) -> dict:
         "password": os.environ.get("PGPASSWORD"),
     }
 
-    def pick(key: str):
+    def pick(key: str) -> str | int | None:
         cli_val = getattr(cli_args, key, None)
         if cli_val is not None:
             return cli_val
@@ -257,7 +258,7 @@ def build_parser() -> argparse.ArgumentParser:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     args = build_parser().parse_args()
 
     # Load config file (may be None)
@@ -298,6 +299,10 @@ def main():
         schema["layer_count"] = len(schema["layers"])
         print(f"      After schema filter '{args.schema_filter}': "
               f"{schema['layer_count']} layer(s).", file=sys.stderr)
+        if not schema["layers"]:
+            print(f"[ERROR] No layers found in schema '{args.schema_filter}'. "
+                  f"Use --list-layers to see available schemas.", file=sys.stderr)
+            sys.exit(1)
 
     # Filter by qualified table name
     if args.layers:
