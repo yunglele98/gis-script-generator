@@ -815,3 +815,100 @@ class TestGeneratePyt:
     def test_schema_filter_param_optional(self, schema, db_config):
         code = generate_pyt(schema, db_config)
         assert 'parameterType="Optional"' in code
+
+
+# ---------------------------------------------------------------------------
+# Password safety in generate_pyqgis and generate_arcpy
+# ---------------------------------------------------------------------------
+
+class TestPasswordNotEmbedded:
+    """Generated scripts must never contain the literal database password."""
+
+    def test_pyqgis_no_hardcoded_password(self, schema, db_config):
+        code = generate_pyqgis(schema, db_config)
+        assert db_config["password"] not in code
+
+    def test_pyqgis_uses_pgpassword_env(self, schema, db_config):
+        code = generate_pyqgis(schema, db_config)
+        assert 'os.environ.get("PGPASSWORD"' in code
+
+    def test_arcpy_no_hardcoded_password(self, schema, db_config):
+        code = generate_arcpy(schema, db_config)
+        assert db_config["password"] not in code
+
+    def test_arcpy_uses_pgpassword_env(self, schema, db_config):
+        code = generate_arcpy(schema, db_config)
+        assert 'os.environ.get("PGPASSWORD"' in code
+
+    def test_pyqgis_with_special_chars_in_password(self, schema, db_config):
+        cfg = {**db_config, "password": "s3cr3t!@#$"}
+        code = generate_pyqgis(schema, cfg)
+        assert "s3cr3t!@#$" not in code
+
+    def test_arcpy_with_special_chars_in_password(self, schema, db_config):
+        cfg = {**db_config, "password": "s3cr3t!@#$"}
+        code = generate_arcpy(schema, cfg)
+        assert "s3cr3t!@#$" not in code
+
+
+# ---------------------------------------------------------------------------
+# floor_ceiling operation generates syntactically valid Python
+# ---------------------------------------------------------------------------
+
+class TestFloorCeilingOp:
+    """The floor_ceiling PyQGIS operation must produce parseable Python."""
+
+    def _floor_ceiling_lines(self, schema):
+        cols = schema["layers"][0]["columns"]
+        return _pyqgis_op_blocks("parcels", "parcels", cols, {"floor_ceiling"})
+
+    def test_generates_lines(self, schema):
+        lines = self._floor_ceiling_lines(schema)
+        assert len(lines) > 0
+
+    def test_output_is_valid_python(self, schema):
+        lines = self._floor_ceiling_lines(schema)
+        # Strip the 4-space indent so we can compile as a module
+        src = "\n".join(ln[4:] if ln.startswith("    ") else ln for ln in lines)
+        # compile() raises SyntaxError if the generated code is malformed
+        compile(src, "<floor_ceiling>", "exec")
+
+    def test_base_field_variable_referenced(self, schema):
+        lines = self._floor_ceiling_lines(schema)
+        joined = "\n".join(lines)
+        assert "_BASE_FIELD_parcels" in joined
+
+    def test_roof_field_variable_referenced(self, schema):
+        lines = self._floor_ceiling_lines(schema)
+        joined = "\n".join(lines)
+        assert "_ROOF_FIELD_parcels" in joined
+
+    def test_expression_uses_f_string_not_format(self, schema):
+        lines = self._floor_ceiling_lines(schema)
+        joined = "\n".join(lines)
+        # Must use f-string interpolation, not the old .format() workaround
+        assert ".format(" not in joined
+
+
+# ---------------------------------------------------------------------------
+# Empty-schema edge cases for generate_pyqgis and generate_arcpy
+# ---------------------------------------------------------------------------
+
+class TestEmptySchemaGenerators:
+    _EMPTY = {"database": "test_db", "layer_count": 0, "layers": []}
+
+    def test_pyqgis_empty_schema_returns_string(self, db_config):
+        code = generate_pyqgis(self._EMPTY, db_config)
+        assert isinstance(code, str)
+
+    def test_pyqgis_empty_schema_has_init_block(self, db_config):
+        code = generate_pyqgis(self._EMPTY, db_config)
+        assert "QgsApplication" in code
+
+    def test_arcpy_empty_schema_returns_string(self, db_config):
+        code = generate_arcpy(self._EMPTY, db_config)
+        assert isinstance(code, str)
+
+    def test_arcpy_empty_schema_has_import(self, db_config):
+        code = generate_arcpy(self._EMPTY, db_config)
+        assert "import arcpy" in code

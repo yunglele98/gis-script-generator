@@ -22,9 +22,11 @@ def generate_webmap():
         gdf_bike_web = gdf_bike.to_crs(TARGET_CRS)
         
         # 3. Create Folium Map (Lat, Lon)
-        # Calculate center
-        center = gdf_bike_web.geometry.union_all().centroid
-        m = folium.Map(location=[center.y, center.x], zoom_start=15, tiles="CartoDB positron")
+        # Calculate center from bounding box (faster than unioning all geometries)
+        minx, miny, maxx, maxy = gdf_bike_web.total_bounds
+        center_lat = (miny + maxy) / 2
+        center_lon = (minx + maxx) / 2
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=15, tiles="CartoDB positron")
         
         # 4. Add Features
         folium.GeoJson(

@@ -65,7 +65,7 @@ def load_toml(path: Path) -> dict:
         )
         sys.exit(1)
     with open(path, "rb") as f:
-        return TOMLLIB.loads(f.read().decode())
+        return TOMLLIB.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +298,10 @@ def main():
         schema["layer_count"] = len(schema["layers"])
         print(f"      After schema filter '{args.schema_filter}': "
               f"{schema['layer_count']} layer(s).", file=sys.stderr)
+        if not schema["layers"]:
+            print(f"[ERROR] No layers found in schema '{args.schema_filter}'. "
+                  f"Use --list-layers to see available schemas.", file=sys.stderr)
+            sys.exit(1)
 
     # Filter by qualified table name
     if args.layers:
