@@ -286,8 +286,78 @@ def sec_install(pdf: GuidePDF):
     )
 
 
+def sec_configuration(pdf: GuidePDF):
+    pdf.chapter(3, "Configuration & Connection")
+
+    pdf.section("Connection value priority")
+    pdf.body(
+        "When a command runs, connection values are resolved in this order (highest wins):"
+    )
+    pdf.code(
+        "1. CLI flags       --host, --port, --dbname, --user, --password\n"
+        "2. Config file     gis_codegen.toml  [database] section\n"
+        "3. Environment     PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD\n"
+        "4. Built-in        localhost / 5432 / my_gis_db / postgres"
+    )
+    pdf.body(
+        "Example: gis-codegen --host prod.example.com --platform pyqgis will use "
+        "prod.example.com for the host, but PGPORT, PGDATABASE, and PGUSER from "
+        "env vars or config file."
+    )
+
+    pdf.section("Config file search order")
+    pdf.body(
+        "gis-codegen looks for a TOML config file in this order (first found wins):"
+    )
+    pdf.code(
+        "1. --config FILE                          (explicit CLI path)\n"
+        "2. $GIS_CODEGEN_CONFIG env var            (if set)\n"
+        "3. ./gis_codegen.toml                     (project root)\n"
+        "4. ~/.config/gis_codegen/config.toml      (user home)"
+    )
+    pdf.body(
+        "Tip: Use project-level gis_codegen.toml for workspace defaults, and "
+        "user-level config.toml for persistent personal settings."
+    )
+
+    pdf.section("Complete config file reference")
+    pdf.code(
+        "# [database] section -- connection credentials\n"
+        "[database]\n"
+        'host     = "localhost"      # PGHOST override\n'
+        "port     = 5432             # PGPORT override\n"
+        'dbname   = "my_gis_db"      # PGDATABASE override\n'
+        'user     = "postgres"       # PGUSER override\n'
+        "# password = \"pass\"          # NOT recommended; use PGPASSWORD env var\n\n"
+        "# [defaults] section -- pre-set generation options\n"
+        "[defaults]\n"
+        'platform      = "pyqgis"    # default platform (pyqgis or arcpy)\n'
+        'schema_filter = "public"    # only extract from this PG schema\n'
+        "no_row_counts = false       # set to true to speed up on large DBs\n"
+        'output        = "output.py" # output file (overridable with -o)\n'
+        'save_schema   = "schema.json"  # auto-save schema for offline use'
+    )
+
+    pdf.section("Password security best practices")
+    pdf.body(
+        "PGPASSWORD should never be stored in committed config files or scripts."
+    )
+    pdf.code(
+        "# Good: set as environment variable at shell level\n"
+        "export PGPASSWORD=secret\n"
+        "gis-codegen --list-layers\n\n"
+        "# Good: use shell script or CI secret management\n"
+        "# Avoid: hardcoding in gis_codegen.toml\n"
+        "# Avoid: embedding in generated Python scripts"
+    )
+    pdf.body(
+        "Windows users: use set instead of export. The password expires when the "
+        "shell closes, so this is safe for interactive use."
+    )
+
+
 def sec_extraction(pdf: GuidePDF):
-    pdf.chapter(3, "Schema Extraction")
+    pdf.chapter(4, "Schema Extraction")
 
     pdf.body(
         "The extractor queries geometry_columns, information_schema.columns, "
@@ -333,7 +403,7 @@ def sec_extraction(pdf: GuidePDF):
 
 
 def sec_pyqgis(pdf: GuidePDF):
-    pdf.chapter(4, "PyQGIS Template")
+    pdf.chapter(5, "PyQGIS Template")
 
     pdf.body(
         "PyQGIS scripts connect to PostGIS via QgsDataSourceUri and load layers "
@@ -404,7 +474,7 @@ def sec_pyqgis(pdf: GuidePDF):
 
 
 def sec_arcpy(pdf: GuidePDF):
-    pdf.chapter(5, "ArcPy Template")
+    pdf.chapter(6, "ArcPy Template")
 
     pdf.body(
         "ArcPy scripts create a temporary .sde connection file, access PostGIS "
@@ -459,7 +529,7 @@ def sec_arcpy(pdf: GuidePDF):
 
 
 def sec_qgs(pdf: GuidePDF):
-    pdf.chapter(6, "QGIS Project File  (--platform qgs)")
+    pdf.chapter(7, "QGIS Project File  (--platform qgs)")
 
     pdf.body(
         "Instead of a Python script, this platform emits a .qgs XML file that "
@@ -525,7 +595,7 @@ def sec_qgs(pdf: GuidePDF):
 
 
 def sec_pyt(pdf: GuidePDF):
-    pdf.chapter(7, "ArcGIS Python Toolbox  (--platform pyt)")
+    pdf.chapter(8, "ArcGIS Python Toolbox  (--platform pyt)")
 
     pdf.body(
         "This platform generates a .pyt Python Toolbox file. When opened in "
@@ -582,7 +652,7 @@ def sec_pyt(pdf: GuidePDF):
 
 
 def sec_webui(pdf: GuidePDF):
-    pdf.chapter(8, "Web UI  (gis-ui)")
+    pdf.chapter(9, "Web UI  (gis-ui)")
 
     pdf.body(
         "The web UI is a minimal Flask application that exposes the full "
@@ -639,7 +709,7 @@ def sec_webui(pdf: GuidePDF):
 
 
 def sec_webmaps(pdf: GuidePDF):
-    pdf.chapter(9, "Web Mapping Templates  (folium / kepler / deck)")
+    pdf.chapter(10, "Web Mapping Templates  (folium / kepler / deck)")
 
     pdf.body(
         "Web templates read PostGIS via geopandas + SQLAlchemy and produce a "
@@ -712,7 +782,7 @@ def sec_webmaps(pdf: GuidePDF):
 
 
 def sec_ops(pdf: GuidePDF):
-    pdf.chapter(10, "Operations Reference  (--op flag)")
+    pdf.chapter(11, "Operations Reference  (--op flag)")
 
     pdf.body(
         "Operations inject additional code blocks into PyQGIS or ArcPy scripts. "
@@ -774,7 +844,7 @@ def sec_ops(pdf: GuidePDF):
 
 
 def sec_catalogue(pdf: GuidePDF):
-    pdf.chapter(11, "Catalogue-Driven Generation")
+    pdf.chapter(12, "Catalogue-Driven Generation")
 
     pdf.body(
         "gis-catalogue reads a map catalogue Excel file and writes one script per "
@@ -839,7 +909,7 @@ def sec_catalogue(pdf: GuidePDF):
 
 
 def sec_symbology(pdf: GuidePDF):
-    pdf.chapter(12, "Symbology Dispatch Table")
+    pdf.chapter(13, "Symbology Dispatch Table")
 
     pdf.body(
         "The symbology_type cell in the catalogue drives automatic renderer "
@@ -886,7 +956,7 @@ def sec_symbology(pdf: GuidePDF):
 
 
 def sec_cat_pyqgis(pdf: GuidePDF):
-    pdf.chapter(13, "Catalogue PyQGIS Template Anatomy")
+    pdf.chapter(14, "Catalogue PyQGIS Template Anatomy")
 
     pdf.body(
         "Each file generated by  gis-catalogue --platform pyqgis  has six sections:"
@@ -975,7 +1045,7 @@ def sec_cat_pyqgis(pdf: GuidePDF):
 
 
 def sec_cat_arcpy(pdf: GuidePDF):
-    pdf.chapter(14, "Catalogue ArcPy Template Anatomy")
+    pdf.chapter(15, "Catalogue ArcPy Template Anatomy")
 
     pdf.body(
         "Each file generated by  gis-catalogue --platform arcpy  has the same "
@@ -1041,7 +1111,7 @@ def sec_cat_arcpy(pdf: GuidePDF):
 
 
 def sec_cli(pdf: GuidePDF):
-    pdf.chapter(15, "CLI Quick Reference")
+    pdf.chapter(16, "CLI Quick Reference")
 
     pdf.section("gis-codegen  --  all flags")
     pdf.code(
@@ -1120,7 +1190,7 @@ def sec_cli(pdf: GuidePDF):
 
 
 def sec_testing(pdf: GuidePDF):
-    pdf.chapter(16, "Testing")
+    pdf.chapter(17, "Testing")
 
     pdf.section("Unit tests  (no database or Docker required)")
     pdf.code(
@@ -1186,6 +1256,372 @@ def sec_testing(pdf: GuidePDF):
     ])
 
 
+def sec_workflows(pdf: GuidePDF):
+    pdf.chapter(18, "Practical Workflows")
+
+    pdf.section("Workflow 1: Load all layers in QGIS with 3D visualization")
+    pdf.body(
+        "Goal: Open all spatial layers in QGIS and extrude buildings by height."
+    )
+    pdf.code(
+        "# 1. Connect to PostGIS and generate a PyQGIS script with 3D extrusion:\n"
+        "set PGPASSWORD=secret\n"
+        "gis-codegen --platform pyqgis --op extrude --op z_stats \\\n"
+        "             -o load_3d.py\n\n"
+        "# 2. Open QGIS\n"
+        "# 3. Open Python console (Plugins > Python Console)\n"
+        "# 4. Run the script:\n"
+        "exec(open('load_3d.py').read())\n\n"
+        "# 5. In the Layers panel, select a layer and use the 3D view button"
+    )
+    pdf.body(
+        "The generated script includes height calculations and is ready for 3D "
+        "rendering. For full 3D visualization, use the --op scene_layer operation "
+        "to export a 3D layer package."
+    )
+
+    pdf.section("Workflow 2: Create web maps from PostGIS data")
+    pdf.body(
+        "Goal: Generate interactive Leaflet and Kepler.gl maps from the database."
+    )
+    pdf.code(
+        "# 1. Generate a Folium map (Leaflet):\n"
+        "gis-codegen --platform folium -o my_map.py\n"
+        "python my_map.py  # -> my_map.html\n\n"
+        "# 2. Generate a Kepler.gl map (large datasets):\n"
+        "gis-codegen --platform kepler -o kepler_map.py\n"
+        "python kepler_map.py  # -> kepler_map.html\n\n"
+        "# 3. Generate a pydeck map (deck.gl with 3D support):\n"
+        "gis-codegen --platform deck -o deck_map.py\n"
+        "python deck_map.py  # -> deck_map.html\n\n"
+        "# Open the .html files in any browser"
+    )
+    pdf.body(
+        "Each generator automatically selects an appropriate layer color scheme "
+        "based on geometry type and data distribution."
+    )
+
+    pdf.section("Workflow 3: Filter layers and apply operations")
+    pdf.body(
+        "Goal: Generate scripts for only polygon layers, with buffer and dissolve."
+    )
+    pdf.code(
+        "# List layers first to see geometry types:\n"
+        "gis-codegen --list-layers\n\n"
+        "# Generate PyQGIS for specific layers with operations:\n"
+        "gis-codegen --platform pyqgis \\\n"
+        "             --layer public.buildings \\\n"
+        "             --layer public.parcels \\\n"
+        "             --op buffer --op dissolve \\\n"
+        "             -o analysis.py"
+    )
+    pdf.body(
+        "Tip: --layer accepts schema.table format. Repeat --layer to select "
+        "multiple layers. Operations are applied in order."
+    )
+
+    pdf.section("Workflow 4: Batch generate scripts from an Excel catalogue")
+    pdf.body(
+        "Goal: Create one script per map in an Excel catalogue, auto-configured."
+    )
+    pdf.code(
+        "# 1. Prepare catalogue.xlsx with columns:\n"
+        "#    map_id, theme, symbology_type, status, spatial_layer_type, etc.\n"
+        "# 2. Run gis-catalogue:\n"
+        "gis-catalogue --input catalogue.xlsx \\\n"
+        "               --platform pyqgis \\\n"
+        "               --output-dir ./generated_scripts/\n\n"
+        "# 3. Check what was filtered (dry-run):\n"
+        "gis-catalogue --input catalogue.xlsx --list"
+    )
+    pdf.body(
+        "Included maps: status IN {have, partial} AND spatial_layer_type contains Vector. "
+        "The symbology_type column determines which renderer is used (choropleth, categorized, etc.)."
+    )
+
+    pdf.section("Workflow 5: Offline generation with saved schema")
+    pdf.body(
+        "Goal: Generate scripts when database is offline or unavailable."
+    )
+    pdf.code(
+        "# 1. While database is online, save the schema:\n"
+        "gis-codegen --save-schema schema.json\n\n"
+        "# 2. Later, generate scripts offline using the saved schema:\n"
+        "gis-codegen --schema schema.json --platform arcpy -o output.py\n\n"
+        "# 3. No database connection is needed for offline generation:\n"
+        "gis-catalogue --input catalogue.xlsx \\\n"
+        "               --schema schema.json \\\n"
+        "               --platform arcpy"
+    )
+    pdf.body(
+        "Schema files are regular JSON and can be committed to version control. "
+        "Use this for reproducible, offline-friendly CI/CD pipelines."
+    )
+
+
+def sec_troubleshooting(pdf: GuidePDF):
+    pdf.chapter(19, "Troubleshooting")
+
+    pdf.section("Error: No database password supplied")
+    pdf.body(
+        "This error occurs when PGPASSWORD is not set and no password was "
+        "provided via CLI flags or config file."
+    )
+    pdf.code(
+        "# Solution 1: Set PGPASSWORD environment variable\n"
+        "set PGPASSWORD=your_password  # Windows\n"
+        "gis-codegen --list-layers\n\n"
+        "# Solution 2: Pass password on command line\n"
+        "gis-codegen --password your_password --list-layers\n\n"
+        "# Solution 3: Add to gis_codegen.toml [database] section\n"
+        "# (Not recommended for security)"
+    )
+
+    pdf.section("Error: No spatial layers found")
+    pdf.body(
+        "The database connected successfully, but no geometry columns were found."
+    )
+    pdf.code(
+        "# Check which tables have geometry:\n"
+        "SELECT table_name, column_name, geometry_type, srid\n"
+        "FROM geometry_columns;"
+    )
+    pdf.body(
+        "Common causes: (1) Geometry columns were added manually without "
+        "AddGeometryColumn function; (2) table is in a non-public schema and "
+        "--schema-filter excludes it; (3) the layer is actually a view and "
+        "the geometry wasn't registered."
+    )
+
+    pdf.section("Error: Operation ignored (warning)")
+    pdf.body(
+        "This is a warning, not an error. Operations (--op) are only supported "
+        "on pyqgis and arcpy platforms."
+    )
+    pdf.code(
+        "# Good: operation is applied\n"
+        "gis-codegen --platform pyqgis --op buffer -o out.py\n\n"
+        "# Warning: operation is silently ignored (generates file anyway)\n"
+        "gis-codegen --platform qgs --op buffer -o out.qgs\n"
+        "[warn] --op buffer ignored (qgs does not support operations)"
+    )
+    pdf.body(
+        "This is intentional design. The script still generates successfully."
+    )
+
+    pdf.section("Error: Connection refused (ECONNREFUSED)")
+    pdf.body(
+        "The CLI tried to connect to the database but the server is unreachable."
+    )
+    pdf.code(
+        "# Check connection parameters:\n"
+        "gis-codegen --host localhost --port 5432 --dbname mydb \\\n"
+        "             --user postgres --list-layers\n\n"
+        "# Verify PostgreSQL is running:\n"
+        "psql --host localhost -U postgres -c 'SELECT 1'  # If psql is installed\n\n"
+        "# Check firewall (if remote):\n"
+        "telnet prod.example.com 5432"
+    )
+
+    pdf.section("Error: Missing module (openpyxl, fpdf2, etc.)")
+    pdf.body(
+        "A required optional dependency is not installed."
+    )
+    pdf.code(
+        "# For gis-catalogue (uses openpyxl for Excel):\n"
+        'pip install -e ".[dev]"\n\n'
+        "# For PDF generation:\n"
+        "pip install fpdf2\n\n"
+        "# For web mapping:\n"
+        'pip install -e ".[web]"\n\n'
+        "# For everything:\n"
+        'pip install -e ".[dev,server,web,integration]"'
+    )
+
+    pdf.section("Generated script fails with ImportError")
+    pdf.body(
+        "The generated script imports a module that is not installed in the "
+        "target environment."
+    )
+    pdf.code(
+        "# For PyQGIS scripts, run inside QGIS Python console\n"
+        "# For ArcPy scripts, run in ArcGIS Pro Python environment\n"
+        "# For Folium/Kepler/pydeck, install web dependencies:\n"
+        'pip install -e ".[web]"'
+    )
+    pdf.body(
+        "Generated scripts use minimal imports: qgis.core (PyQGIS), arcpy (ArcPy), "
+        "folium (Folium), etc. Ensure the target platform has its SDK installed."
+    )
+
+    pdf.section("Generated script missing columns")
+    pdf.body(
+        "The script ran but some attribute columns are missing from the output layer."
+    )
+    pdf.code(
+        "# This usually means the column was dropped in a dissolve or spatial join.\n"
+        "# Check the source table:\n"
+        "SELECT * FROM public.my_table LIMIT 1;\n\n"
+        "# And verify the generated script includes all columns in the operation"
+    )
+    pdf.body(
+        "The generators include all columns by default unless an operation "
+        "(e.g., dissolve) drops them. Review the operation parameters in the "
+        "generated script."
+    )
+
+
+def sec_architecture(pdf: GuidePDF):
+    pdf.chapter(20, "Architecture & Design")
+
+    pdf.section("System overview")
+    pdf.body(
+        "gis-codegen is a code generation pipeline with three main stages:"
+    )
+    pdf.code(
+        "PostGIS Database\n"
+        "      |\n"
+        "      v\n"
+        "  Extractor (extract_schema)\n"
+        "      |\n"
+        "      | Returns: Schema dict (JSON structure)\n"
+        "      |\n"
+        "      v\n"
+        "  Generator (generate_* functions)\n"
+        "      |\n"
+        "      | Returns: Python code string (or XML for QGS)\n"
+        "      |\n"
+        "      v\n"
+        "  Output (stdout or file)\n"
+    )
+
+    pdf.section("Schema dict structure")
+    pdf.body(
+        "extract_schema() returns a normalized dictionary representing all spatial "
+        "layers in the database. This structure is the lingua franca between "
+        "extraction and generation."
+    )
+    pdf.code(
+        "{\n"
+        '  "database": "my_gis_db",\n'
+        '  "host": "localhost",\n'
+        '  "layer_count": 3,\n'
+        '  "layers": [\n'
+        "    {\n"
+        '      "schema": "public",\n'
+        '      "table": "buildings",\n'
+        '      "qualified_name": "public.buildings",\n'
+        '      "geometry": {\n'
+        '        "column": "geom",\n'
+        '        "type": "MULTIPOLYGON",\n'
+        '        "srid": 4326\n'
+        "      },\n"
+        '      "columns": [\n'
+        "        {\"name\": \"gid\", \"data_type\": \"integer\", "
+        "\"nullable\": false},\n"
+        "        {\"name\": \"height\", \"data_type\": \"double precision\", "
+        "\"nullable\": true}\n"
+        "      ],\n"
+        '      "primary_keys": ["gid"],\n'
+        '      "row_count_estimate": 42000,\n'
+        '      "comment": "Optional table description"\n'
+        "    }\n"
+        "  ]\n"
+        "}"
+    )
+
+    pdf.section("Generator functions")
+    pdf.body(
+        "Each platform has a generator function that takes a schema dict and "
+        "returns a string of code ready to run."
+    )
+    pdf.code(
+        "from gis_codegen import generate_pyqgis, generate_arcpy\n\n"
+        "schema = extract_schema(conn)\n"
+        "pyqgis_code = generate_pyqgis(schema, operations=['buffer'])\n"
+        "arcpy_code = generate_arcpy(schema, operations=['buffer'])\n\n"
+        "# Write to file or stdout\n"
+        "with open('load.py', 'w') as f:\n"
+        "    f.write(pyqgis_code)"
+    )
+
+    pdf.section("Operation blocks")
+    pdf.body(
+        "Operations are Python code blocks inserted into the generated script. "
+        "Each operation (buffer, clip, dissolve, etc.) is implemented as a "
+        "template that receives the layer name and geometry type as context."
+    )
+    pdf.code(
+        "Valid operations: reproject, export, buffer, clip, select, dissolve,\n"
+        "                  centroid, field_calc, spatial_join, intersect,\n"
+        "                  extrude, z_stats, floor_ceiling, volume, scene_layer\n\n"
+        "PyQGIS operations use QGIS Processing algorithms (native:buffer, etc.).\n"
+        "ArcPy operations use ArcGIS Spatial Analyst and Management tools."
+    )
+
+    pdf.section("Type mapping")
+    pdf.body(
+        "PostgreSQL data types are mapped to platform-specific types."
+    )
+    pdf.code(
+        "PostgreSQL          PyQGIS              ArcPy\n"
+        "-----------------------------------------------\n"
+        "integer             QVariant.Int        -  (not used)\n"
+        "text                QVariant.String     TEXT\n"
+        "double precision    QVariant.Double     DOUBLE\n"
+        "boolean             QVariant.Bool       -\n"
+        "timestamp           QVariant.DateTime   DATE\n"
+    )
+    pdf.body(
+        "Type mappings are defined in generator.py as pg_type_to_pyqgis() and "
+        "pg_type_to_arcpy() functions. Custom types fall back to STRING."
+    )
+
+    pdf.section("Catalogue (map-driven generation)")
+    pdf.body(
+        "gis-catalogue reads an Excel file where each row represents a \"map\" "
+        "(a visualization of one or more layers with a specific symbology)."
+    )
+    pdf.code(
+        "Columns: map_id, theme, symbology_type, status, spatial_layer_type,\n"
+        "         data sources, description, owner, effort, dependencies, ...\n\n"
+        "Filter: status IN {have, partial} AND spatial_layer_type contains Vector\n\n"
+        "Symbology dispatch table maps symbology_type to renderer logic:\n"
+        '  "choroplèthe (dégradé)" -> continuous color scale (PyQGIS GraduatedSymbol)\n'
+        '  "choroplèthe catégoriel" -> categorical colors (PyQGIS CategorizedSymbol)\n'
+        '  "points" -> single color (PyQGIS SimpleMarker)'
+    )
+    pdf.body(
+        "One script is generated per included map, with per-map layer selection "
+        "and symbology applied automatically."
+    )
+
+    pdf.section("Extension points")
+    pdf.body(
+        "Developers can extend gis-codegen by:"
+    )
+    pdf.bullets([
+        "Adding custom generators for new platforms (implement signature: "
+        "generate_myplatform(schema: dict, operations: list = None) -> str)",
+        "Adding custom operations (add to VALID_OPERATIONS set and implement "
+        "_op_MYOP_pyqgis/arcpy functions)",
+        "Adding custom symbology renderers (extend SymbologyRenderer class in "
+        "catalogue.py)",
+        "Using the public API (connect, extract_schema, generate_*) in custom "
+        "workflows",
+        "Saving and loading schemas offline for reproducible batch generation",
+    ])
+
+    pdf.section("Performance notes")
+    pdf.bullets([
+        "Unit tests (no database): ~2 seconds",
+        "Extraction with row counts: depends on table size, usually 1-5 seconds",
+        "Extraction with --no-row-counts: <1 second (recommended for large DBs)",
+        "Generation: instant (string building)",
+        "Catalogue: ~1 second per 100 maps (depends on layer count and operations)",
+    ])
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1196,22 +1632,26 @@ def main():
     pdf.set_auto_page_break(auto=True, margin=22)
 
     cover(pdf)
-    sec_overview(pdf)       # Ch  1
-    sec_install(pdf)        # Ch  2
-    sec_extraction(pdf)     # Ch  3
-    sec_pyqgis(pdf)         # Ch  4
-    sec_arcpy(pdf)          # Ch  5
-    sec_qgs(pdf)            # Ch  6  NEW
-    sec_pyt(pdf)            # Ch  7  NEW
-    sec_webui(pdf)          # Ch  8  NEW
-    sec_webmaps(pdf)        # Ch  9  (was 6)
-    sec_ops(pdf)            # Ch 10  (was 7)
-    sec_catalogue(pdf)      # Ch 11  (was 8)
-    sec_symbology(pdf)      # Ch 12  (was 9)
-    sec_cat_pyqgis(pdf)     # Ch 13  (was 10)
-    sec_cat_arcpy(pdf)      # Ch 14  (was 11)
-    sec_cli(pdf)            # Ch 15  (was 12)
-    sec_testing(pdf)        # Ch 16  (was 13)
+    sec_overview(pdf)           # Ch  1
+    sec_install(pdf)            # Ch  2
+    sec_configuration(pdf)      # Ch  3
+    sec_extraction(pdf)         # Ch  4
+    sec_pyqgis(pdf)             # Ch  5
+    sec_arcpy(pdf)              # Ch  6
+    sec_qgs(pdf)                # Ch  7
+    sec_pyt(pdf)                # Ch  8
+    sec_webui(pdf)              # Ch  9
+    sec_webmaps(pdf)            # Ch 10
+    sec_ops(pdf)                # Ch 11
+    sec_catalogue(pdf)          # Ch 12
+    sec_symbology(pdf)          # Ch 13
+    sec_cat_pyqgis(pdf)         # Ch 14
+    sec_cat_arcpy(pdf)          # Ch 15
+    sec_cli(pdf)                # Ch 16
+    sec_testing(pdf)            # Ch 17
+    sec_workflows(pdf)          # Ch 18
+    sec_troubleshooting(pdf)    # Ch 19
+    sec_architecture(pdf)       # Ch 20
 
     pdf.output(OUTPUT)
     print(f"[OK] {OUTPUT}  ({pdf.page} pages)")
