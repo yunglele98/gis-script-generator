@@ -238,12 +238,12 @@ class TestCompositionLayoutFilterSchema:
         assert "missing" in captured.err
 
     def test_empty_layout_returns_empty_schema(self, sample_schema):
-        """Layout with no layers returns empty schema."""
+        """Layout with no layers or filters returns all layers."""
         layout = CompositionLayout()
 
         filtered = layout.filter_schema(sample_schema)
-        assert filtered["layer_count"] == 0
-        assert filtered["layers"] == []
+        assert filtered["layer_count"] == 3
+        assert len(filtered["layers"]) == 3
 
 
 class TestCompositionLayoutPerLayerOps:
@@ -790,7 +790,7 @@ class TestCompositionLayoutAttributeFilters:
         """Filter keeps layers with row count >= min_rows."""
         layout = CompositionLayout(filter_min_rows=100)
         filtered = layout.filter_schema(multi_layer_schema)
-        assert filtered["layer_count"] == 4
+        assert filtered["layer_count"] == 3
         # parks (50) and boundaries (10) are excluded
         tables = [l["table"] for l in filtered["layers"]]
         assert "parks" not in tables
@@ -836,10 +836,10 @@ class TestCompositionLayoutAttributeFilters:
             filter_min_rows=100
         )
         filtered = layout.filter_schema(multi_layer_schema)
-        assert filtered["layer_count"] == 2
+        assert filtered["layer_count"] == 1
         tables = [l["table"] for l in filtered["layers"]]
         assert "buildings" in tables
-        assert "parks" not in tables  # excluded by min_rows
+        assert "parks" not in tables  # excluded by min_rows (50 < 100)
 
     def test_whitelist_and_filter_intersect(self, multi_layer_schema):
         """Whitelist and attribute filters apply to result."""

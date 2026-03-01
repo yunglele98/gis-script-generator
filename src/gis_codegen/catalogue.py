@@ -665,13 +665,13 @@ def generate_map_qgs(m: dict, db_config: dict,
     """
     short_name = m.get("short_name", "layer")
 
+    geom_default = {"type": "GEOMETRY", "srid": 4326, "column": "geom"}
     if layer_info:
-        geom         = layer_info.get("geometry",
-                                      {"type": "GEOMETRY", "srid": 4326, "column": "geom"})
+        geom         = {**geom_default, **layer_info.get("geometry", {})}
         primary_keys = layer_info.get("primary_keys", [])
         columns      = layer_info.get("columns", [])
     else:
-        geom         = {"type": "GEOMETRY", "srid": 4326, "column": "geom"}
+        geom         = geom_default
         primary_keys = []
         columns      = []
 
@@ -707,13 +707,13 @@ def generate_map_pyt(m: dict, db_config: dict,
     """
     short_name = m.get("short_name", "layer")
 
+    geom_default = {"type": "GEOMETRY", "srid": 4326, "column": "geom"}
     if layer_info:
-        geom         = layer_info.get("geometry",
-                                      {"type": "GEOMETRY", "srid": 4326, "column": "geom"})
+        geom         = {**geom_default, **layer_info.get("geometry", {})}
         primary_keys = layer_info.get("primary_keys", [])
         columns      = layer_info.get("columns", [])
     else:
-        geom         = {"type": "GEOMETRY", "srid": 4326, "column": "geom"}
+        geom         = geom_default
         primary_keys = []
         columns      = []
 
