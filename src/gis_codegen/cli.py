@@ -35,7 +35,7 @@ from gis_codegen.generator import (
     generate_export, generate_qgs, generate_pyt,
     VALID_OPERATIONS,
 )
-from gis_codegen.layout import TemplateConfig, CompositionLayout
+from gis_codegen.layout import TemplateConfig, CompositionLayout, MetadataOverlay
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +250,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="TOML template file for custom code layout (preamble, imports, etc.).",
     )
     gen.add_argument(
+        "--metadata", metavar="FILE", default=None,
+        help="TOML metadata overlay file (layer descriptions, owners, notes).",
+    )
+    gen.add_argument(
         "--layout", metavar="FILE", default=None,
         help="TOML composition layout file (layer selection + per-layer operations).",
     )
@@ -331,9 +335,15 @@ def main() -> None:
         )
         print(f"      Schema saved to {args.save_schema}.", file=sys.stderr)
 
-    # Load template and layout if provided
+    # Load template, metadata, and layout if provided
     template = TemplateConfig.from_toml(args.template) if args.template else None
+    metadata = MetadataOverlay.from_toml(args.metadata) if args.metadata else None
     layout = CompositionLayout.from_toml(args.layout) if args.layout else None
+
+    # Apply metadata overlay (enriches layer metadata)
+    if metadata:
+        schema = metadata.apply(schema)
+        print(f"      Metadata overlay applied.", file=sys.stderr)
 
     # Apply composition layout (filters and reorders layers)
     if layout:

@@ -724,14 +724,23 @@ def generate_pyqgis(
             lines.append(prefix)
             lines.append(f'')
 
-        lines += [
+        header_lines = [
             f'# {"=" * 66}',
             f'# Layer : {schema_name}.{table}',
             f'# Geom  : {geom["type"]}  |  SRID: {geom["srid"]}',
             f'# Rows  : ~{row_est:,}' if row_est >= 0 else f'# Rows  : unknown',
             f'# Fields: {field_comments or "(none)"}',
-            f'# {"=" * 66}',
-            f'',
+        ]
+        if layer.get("description"):
+            header_lines.append(f'# Description: {layer["description"]}')
+        if layer.get("owner"):
+            header_lines.append(f'# Owner: {layer["owner"]}')
+        if layer.get("notes"):
+            header_lines.append(f'# Notes: {layer["notes"]}')
+        header_lines.append(f'# {"=" * 66}')
+        header_lines.append(f'')
+        lines += header_lines
+        lines += [
             f'uri_{var} = QgsDataSourceUri()',
             f'uri_{var}.setConnection(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)',
             f'uri_{var}.setDataSource(',
@@ -930,14 +939,23 @@ def generate_arcpy(
             lines.append(prefix)
             lines.append(f'')
 
-        lines += [
+        header_lines = [
             f'# {"=" * 66}',
             f'# Layer : {schema_name}.{table}',
             f'# Geom  : {geom["type"]}  |  SRID: {geom["srid"]}',
             f'# Rows  : ~{row_est:,}' if row_est >= 0 else f'# Rows  : unknown',
             f'# Fields: {field_comments or "(none)"}',
-            f'# {"=" * 66}',
-            f'',
+        ]
+        if layer.get("description"):
+            header_lines.append(f'# Description: {layer["description"]}')
+        if layer.get("owner"):
+            header_lines.append(f'# Owner: {layer["owner"]}')
+        if layer.get("notes"):
+            header_lines.append(f'# Notes: {layer["notes"]}')
+        header_lines.append(f'# {"=" * 66}')
+        header_lines.append(f'')
+        lines += header_lines
+        lines += [
             f'fc_{var} = os.path.join(SDE_FILE, "{schema_name}.{table}")',
             f'',
             f'if arcpy.Exists(fc_{var}):',

@@ -449,3 +449,520 @@ include_sample_rows = false
 
         # Should have processing import because of per_layer_ops
         assert "from qgis import processing" in code
+
+
+# ---------------------------------------------------------------------------
+# MetadataOverlay tests
+# ---------------------------------------------------------------------------
+
+class TestMetadataOverlayFromToml:
+    """Test MetadataOverlay.from_toml() loading."""
+
+    def test_loads_layer_metadata(self, tmp_path):
+        """Load metadata with description, owner, notes."""
+        from gis_codegen.layout import MetadataOverlay
+
+        toml_file = tmp_path / "metadata.toml"
+        toml_file.write_text(
+            """
+[[layers]]
+table = "buildings"
+description = "Building footprints from aerial survey 2024"
+owner = "GIS Team"
+notes = "Source: City Open Data Portal"
+
+[[layers]]
+table = "public.streets"
+description = "Centreline street network"
+"""
+        )
+
+        overlay = MetadataOverlay.from_toml(str(toml_file))
+        assert len(overlay.layers) == 2
+        assert overlay.layers[0]["table"] == "buildings"
+        assert overlay.layers[0]["description"] == "Building footprints from aerial survey 2024"
+        assert overlay.layers[0]["owner"] == "GIS Team"
+        assert overlay.layers[0]["notes"] == "Source: City Open Data Portal"
+        assert overlay.layers[1]["table"] == "public.streets"
+
+    def test_missing_file_exits(self, tmp_path):
+        """from_toml exits if file not found."""
+        from gis_codegen.layout import MetadataOverlay
+
+        with pytest.raises(SystemExit):
+            MetadataOverlay.from_toml(str(tmp_path / "nonexistent.toml"))
+
+    def test_invalid_toml_exits(self, tmp_path):
+        """from_toml exits on invalid TOML syntax."""
+        from gis_codegen.layout import MetadataOverlay
+
+        toml_file = tmp_path / "bad.toml"
+        toml_file.write_text("[[layers] invalid syntax {")
+
+        with pytest.raises(SystemExit):
+            MetadataOverlay.from_toml(str(toml_file))
+
+    def test_apply_merges_metadata(self, tmp_path):
+        """apply() merges metadata into matching schema layers."""
+        from gis_codegen.layout import MetadataOverlay
+
+        toml_file = tmp_path / "metadata.toml"
+        toml_file.write_text(
+            """
+[[layers]]
+table = "buildings"
+description = "Building footprints"
+owner = "Team A"
+"""
+        )
+
+        overlay = MetadataOverlay.from_toml(str(toml_file))
+        schema = {
+            "database": "test_db",
+            "layer_count": 1,
+            "layers": [
+                {
+                    "schema": "public",
+                    "table": "buildings",
+                    "qualified_name": "public.buildings",
+                    "geometry": {"type": "POLYGON", "srid": 4326, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                }
+            ],
+        }
+
+        new_schema = overlay.apply(schema)
+        assert new_schema["layers"][0]["description"] == "Building footprints"
+        assert new_schema["layers"][0]["owner"] == "Team A"
+        assert new_schema != schema  # Non-destructive
+
+    def test_apply_by_qualified_name(self, tmp_path):
+        """apply() matches by qualified name."""
+        from gis_codegen.layout import MetadataOverlay
+
+        toml_file = tmp_path / "metadata.toml"
+        toml_file.write_text(
+            """
+[[layers]]
+table = "public.buildings"
+description = "Qualified name match"
+"""
+        )
+
+        overlay = MetadataOverlay.from_toml(str(toml_file))
+        schema = {
+            "database": "test_db",
+            "layer_count": 1,
+            "layers": [
+                {
+                    "schema": "public",
+                    "table": "buildings",
+                    "qualified_name": "public.buildings",
+                    "geometry": {"type": "POLYGON", "srid": 4326, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                }
+            ],
+        }
+
+        new_schema = overlay.apply(schema)
+        assert new_schema["layers"][0]["description"] == "Qualified name match"
+
+    def test_apply_skips_missing_layers(self, tmp_path):
+        """apply() skips metadata for layers not in schema."""
+        from gis_codegen.layout import MetadataOverlay
+
+        toml_file = tmp_path / "metadata.toml"
+        toml_file.write_text(
+            """
+[[layers]]
+table = "missing"
+description = "Not in schema"
+"""
+        )
+
+        overlay = MetadataOverlay.from_toml(str(toml_file))
+        schema = {
+            "database": "test_db",
+            "layer_count": 1,
+            "layers": [
+                {
+                    "schema": "public",
+                    "table": "buildings",
+                    "qualified_name": "public.buildings",
+                    "geometry": {"type": "POLYGON", "srid": 4326, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                }
+            ],
+        }
+
+        new_schema = overlay.apply(schema)
+        assert "description" not in new_schema["layers"][0]
+
+
+# ---------------------------------------------------------------------------
+# TemplateConfig inheritance tests
+# ---------------------------------------------------------------------------
+
+class TestTemplateConfigInheritance:
+    """Test TemplateConfig template inheritance via extends."""
+
+    def test_child_inherits_base_preamble(self, tmp_path):
+        """Child template inherits preamble from base."""
+        base_file = tmp_path / "base.toml"
+        base_file.write_text(
+            """
+[custom]
+preamble = "# Base preamble"
+"""
+        )
+
+        child_file = tmp_path / "child.toml"
+        child_file.write_text(
+            """
+extends = "base.toml"
+name = "Child"
+"""
+        )
+
+        cfg = TemplateConfig.from_toml(str(child_file))
+        assert cfg.name == "Child"
+        assert cfg.preamble == "# Base preamble"
+
+    def test_child_overrides_base_preamble(self, tmp_path):
+        """Child preamble overrides base preamble."""
+        base_file = tmp_path / "base.toml"
+        base_file.write_text(
+            """
+[custom]
+preamble = "# Base preamble"
+"""
+        )
+
+        child_file = tmp_path / "child.toml"
+        child_file.write_text(
+            """
+extends = "base.toml"
+[custom]
+preamble = "# Child preamble"
+"""
+        )
+
+        cfg = TemplateConfig.from_toml(str(child_file))
+        assert cfg.preamble == "# Child preamble"
+
+    def test_child_inherits_section_flags(self, tmp_path):
+        """Child inherits section flags from base when not specified."""
+        base_file = tmp_path / "base.toml"
+        base_file.write_text(
+            """
+[sections]
+include_sample_rows = false
+include_crs_info = true
+"""
+        )
+
+        child_file = tmp_path / "child.toml"
+        child_file.write_text(
+            """
+extends = "base.toml"
+[sections]
+include_sample_rows = true
+"""
+        )
+
+        cfg = TemplateConfig.from_toml(str(child_file))
+        assert cfg.include_sample_rows is True  # overridden
+        assert cfg.include_crs_info is True  # inherited
+
+    def test_circular_inheritance_exits(self, tmp_path):
+        """Circular template inheritance exits with error."""
+        file_a = tmp_path / "a.toml"
+        file_a.write_text('extends = "b.toml"')
+
+        file_b = tmp_path / "b.toml"
+        file_b.write_text('extends = "a.toml"')
+
+        with pytest.raises(SystemExit):
+            TemplateConfig.from_toml(str(file_a))
+
+    def test_extends_resolves_relative_path(self, tmp_path):
+        """extends path is relative to the child file."""
+        subdir = tmp_path / "templates"
+        subdir.mkdir()
+
+        base_file = subdir / "base.toml"
+        base_file.write_text(
+            """
+[custom]
+preamble = "# From subdir"
+"""
+        )
+
+        child_file = subdir / "child.toml"
+        child_file.write_text('extends = "base.toml"')
+
+        cfg = TemplateConfig.from_toml(str(child_file))
+        assert cfg.preamble == "# From subdir"
+
+
+# ---------------------------------------------------------------------------
+# CompositionLayout attribute filtering tests
+# ---------------------------------------------------------------------------
+
+class TestCompositionLayoutAttributeFilters:
+    """Test CompositionLayout smart attribute filtering."""
+
+    @pytest.fixture
+    def multi_layer_schema(self):
+        """Schema with 5 diverse layers."""
+        return {
+            "database": "test_db",
+            "layer_count": 5,
+            "layers": [
+                {
+                    "schema": "public",
+                    "table": "buildings",
+                    "qualified_name": "public.buildings",
+                    "geometry": {"type": "POLYGON", "srid": 4326, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                    "row_count_estimate": 1000,
+                },
+                {
+                    "schema": "public",
+                    "table": "streets",
+                    "qualified_name": "public.streets",
+                    "geometry": {"type": "LINESTRING", "srid": 4326, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                    "row_count_estimate": 500,
+                },
+                {
+                    "schema": "public",
+                    "table": "parks",
+                    "qualified_name": "public.parks",
+                    "geometry": {"type": "POLYGON", "srid": 4326, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                    "row_count_estimate": 50,
+                },
+                {
+                    "schema": "admin",
+                    "table": "boundaries",
+                    "qualified_name": "admin.boundaries",
+                    "geometry": {"type": "POLYGON", "srid": 2952, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                    "row_count_estimate": 10,
+                },
+                {
+                    "schema": "public",
+                    "table": "points",
+                    "qualified_name": "public.points",
+                    "geometry": {"type": "POINT", "srid": 4326, "column": "geom"},
+                    "columns": [],
+                    "primary_keys": ["id"],
+                    "row_count_estimate": 10000,
+                },
+            ],
+        }
+
+    def test_filter_by_geom_types(self, multi_layer_schema):
+        """Filter keeps only matching geometry types."""
+        layout = CompositionLayout(filter_geom_types=["POLYGON"])
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 3
+        assert filtered["layers"][0]["table"] == "buildings"
+        assert filtered["layers"][1]["table"] == "parks"
+        assert filtered["layers"][2]["table"] == "boundaries"
+
+    def test_filter_by_srid(self, multi_layer_schema):
+        """Filter keeps only matching SRID."""
+        layout = CompositionLayout(filter_srid=2952)
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 1
+        assert filtered["layers"][0]["table"] == "boundaries"
+
+    def test_filter_by_min_rows(self, multi_layer_schema):
+        """Filter keeps layers with row count >= min_rows."""
+        layout = CompositionLayout(filter_min_rows=100)
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 4
+        # parks (50) and boundaries (10) are excluded
+        tables = [l["table"] for l in filtered["layers"]]
+        assert "parks" not in tables
+        assert "boundaries" not in tables
+
+    def test_filter_by_max_rows(self, multi_layer_schema):
+        """Filter keeps layers with row count <= max_rows."""
+        layout = CompositionLayout(filter_max_rows=1000)
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 4
+        # points (10000) is excluded
+        tables = [l["table"] for l in filtered["layers"]]
+        assert "points" not in tables
+
+    def test_filter_by_schema(self, multi_layer_schema):
+        """Filter keeps only layers in specified schemas."""
+        layout = CompositionLayout(filter_schemas=["public"])
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 4
+        assert filtered["layers"][0]["schema"] == "public"
+
+    def test_filter_exclude_tables(self, multi_layer_schema):
+        """Filter excludes specified tables by unqualified name."""
+        layout = CompositionLayout(filter_exclude_tables=["parks", "points"])
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 3
+        tables = [l["table"] for l in filtered["layers"]]
+        assert "parks" not in tables
+        assert "points" not in tables
+
+    def test_filter_exclude_qualified_names(self, multi_layer_schema):
+        """Filter excludes tables specified by qualified name."""
+        layout = CompositionLayout(filter_exclude_tables=["admin.boundaries"])
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 4
+        assert all(l["table"] != "boundaries" for l in filtered["layers"])
+
+    def test_multiple_filters_combine_with_and(self, multi_layer_schema):
+        """Multiple filters combine with AND semantics."""
+        layout = CompositionLayout(
+            filter_geom_types=["POLYGON"],
+            filter_srid=4326,
+            filter_min_rows=100
+        )
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 2
+        tables = [l["table"] for l in filtered["layers"]]
+        assert "buildings" in tables
+        assert "parks" not in tables  # excluded by min_rows
+
+    def test_whitelist_and_filter_intersect(self, multi_layer_schema):
+        """Whitelist and attribute filters apply to result."""
+        layout = CompositionLayout(
+            layers=[
+                {"table": "buildings"},
+                {"table": "streets"},
+                {"table": "parks"},
+            ],
+            filter_min_rows=100
+        )
+        filtered = layout.filter_schema(multi_layer_schema)
+        # Only buildings and streets meet min_rows=100
+        assert filtered["layer_count"] == 2
+        tables = [l["table"] for l in filtered["layers"]]
+        assert "buildings" in tables
+        assert "streets" in tables
+        assert "parks" not in tables
+
+    def test_no_filters_no_whitelist_returns_all(self, multi_layer_schema):
+        """Layout with no filters or whitelist returns all layers."""
+        layout = CompositionLayout()
+        filtered = layout.filter_schema(multi_layer_schema)
+        assert filtered["layer_count"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Metadata + Generator integration tests
+# ---------------------------------------------------------------------------
+
+class TestMetadataInGeneratedCode:
+    """Test that metadata is emitted in generated scripts."""
+
+    @pytest.fixture
+    def schema_with_metadata(self):
+        """Schema with metadata fields populated."""
+        return {
+            "database": "test_db",
+            "host": "localhost",
+            "layer_count": 1,
+            "layers": [
+                {
+                    "schema": "public",
+                    "table": "buildings",
+                    "qualified_name": "public.buildings",
+                    "geometry": {"type": "POLYGON", "srid": 4326, "column": "geom"},
+                    "columns": [
+                        {"name": "id", "data_type": "integer", "nullable": False},
+                    ],
+                    "primary_keys": ["id"],
+                    "row_count_estimate": 1000,
+                    "description": "Building footprints",
+                    "owner": "GIS Team",
+                    "notes": "Updated monthly",
+                }
+            ],
+        }
+
+    @pytest.fixture
+    def db_config(self):
+        """Database config fixture."""
+        return {
+            "host": "localhost",
+            "port": 5432,
+            "dbname": "test_db",
+            "user": "postgres",
+            "password": "secret",
+        }
+
+    def test_pyqgis_emits_description(self, schema_with_metadata, db_config):
+        """generate_pyqgis includes Description comment."""
+        from gis_codegen.generator import generate_pyqgis
+
+        code = generate_pyqgis(schema_with_metadata, db_config)
+        assert "# Description: Building footprints" in code
+
+    def test_pyqgis_emits_owner(self, schema_with_metadata, db_config):
+        """generate_pyqgis includes Owner comment."""
+        from gis_codegen.generator import generate_pyqgis
+
+        code = generate_pyqgis(schema_with_metadata, db_config)
+        assert "# Owner: GIS Team" in code
+
+    def test_pyqgis_emits_notes(self, schema_with_metadata, db_config):
+        """generate_pyqgis includes Notes comment."""
+        from gis_codegen.generator import generate_pyqgis
+
+        code = generate_pyqgis(schema_with_metadata, db_config)
+        assert "# Notes: Updated monthly" in code
+
+    def test_arcpy_emits_metadata(self, schema_with_metadata, db_config):
+        """generate_arcpy includes metadata comments."""
+        from gis_codegen.generator import generate_arcpy
+
+        code = generate_arcpy(schema_with_metadata, db_config)
+        assert "# Description: Building footprints" in code
+        assert "# Owner: GIS Team" in code
+        assert "# Notes: Updated monthly" in code
+
+    def test_no_metadata_no_comments(self, db_config):
+        """Script without metadata has no extra comments."""
+        from gis_codegen.generator import generate_pyqgis
+
+        schema = {
+            "database": "test_db",
+            "host": "localhost",
+            "layer_count": 1,
+            "layers": [
+                {
+                    "schema": "public",
+                    "table": "buildings",
+                    "qualified_name": "public.buildings",
+                    "geometry": {"type": "POLYGON", "srid": 4326, "column": "geom"},
+                    "columns": [
+                        {"name": "id", "data_type": "integer", "nullable": False},
+                    ],
+                    "primary_keys": ["id"],
+                    "row_count_estimate": 1000,
+                }
+            ],
+        }
+
+        code = generate_pyqgis(schema, db_config)
+        assert "# Description:" not in code
+        assert "# Owner:" not in code
+        assert "# Notes:" not in code
