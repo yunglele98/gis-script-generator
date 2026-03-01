@@ -35,6 +35,7 @@ from gis_codegen.generator import (
     generate_export, generate_qgs, generate_pyt,
     VALID_OPERATIONS,
 )
+from gis_codegen.layout import TemplateConfig, CompositionLayout
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +245,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Add an operation block to every layer "
              f"({', '.join(VALID_OPERATIONS)}). Repeatable.",
     )
+    gen.add_argument(
+        "--template", metavar="FILE", default=None,
+        help="TOML template file for custom code layout (preamble, imports, etc.).",
+    )
+    gen.add_argument(
+        "--layout", metavar="FILE", default=None,
+        help="TOML composition layout file (layer selection + per-layer operations).",
+    )
 
     # --- Preview ---
     p.add_argument(
@@ -322,22 +331,46 @@ def main() -> None:
         )
         print(f"      Schema saved to {args.save_schema}.", file=sys.stderr)
 
-    if not args.platform:
+    # Load template and layout if provided
+    template = TemplateConfig.from_toml(args.template) if args.template else None
+    layout = CompositionLayout.from_toml(args.layout) if args.layout else None
+
+    # Apply composition layout (filters and reorders layers)
+    if layout:
+        schema = layout.filter_schema(schema)
+        print(f"      After layout filter: {schema['layer_count']} layer(s).", file=sys.stderr)
+
+    # Determine effective platform (layout can override if not explicitly set)
+    platform = args.platform
+    if not platform and layout and layout.platform:
+        platform = layout.platform
+        print(f"      Using platform from layout: {platform}", file=sys.stderr)
+
+    if not platform:
         print("[ERROR] --platform is required unless --list-layers is used.", file=sys.stderr)
         sys.exit(1)
 
+    # Determine effective output path (layout can override if not explicitly set)
+    output_path = args.output
+    if not output_path and layout and layout.output:
+        output_path = layout.output
+        print(f"      Using output path from layout: {output_path}", file=sys.stderr)
+
     # Step 2: generate
-    print(f"[2/2] Generating {args.platform} script ...", file=sys.stderr)
+    print(f"[2/2] Generating {platform} script ...", file=sys.stderr)
     _no_op_platforms = {"folium", "kepler", "deck", "export", "qgs", "pyt"}
-    if args.operations and args.platform in _no_op_platforms:
-        print(f"[warn] --op flags are ignored for {args.platform}.",
+    if args.operations and platform in _no_op_platforms:
+        print(f"[warn] --op flags are ignored for {platform}.",
               file=sys.stderr)
     elif args.operations:
         print(f"      Operations: {', '.join(args.operations)}", file=sys.stderr)
 
+    # Get per-layer operations from layout
+    per_layer_ops = layout.per_layer_ops() if layout else None
+
     generators = {
-        "pyqgis":  lambda: generate_pyqgis(schema, db_config, args.operations),
-        "arcpy":   lambda: generate_arcpy(schema, db_config, args.operations),
+        "pyqgis":  lambda: generate_pyqgis(schema, db_config, args.operations, template=template, per_layer_ops=per_layer_ops),
+        "arcpy":   lambda: generate_arcpy(schema, db_config, args.operations, template=template, per_layer_ops=per_layer_ops),
         "folium":  lambda: generate_folium(schema, db_config),
         "kepler":  lambda: generate_kepler(schema, db_config),
         "deck":    lambda: generate_deck(schema, db_config),
@@ -345,11 +378,11 @@ def main() -> None:
         "qgs":     lambda: generate_qgs(schema, db_config),
         "pyt":     lambda: generate_pyt(schema, db_config),
     }
-    code = generators[args.platform]()
+    code = generators[platform]()
 
-    if args.output:
-        Path(args.output).write_text(code, encoding="utf-8")
-        print(f"[OK]  Written to {args.output}", file=sys.stderr)
+    if output_path:
+        Path(output_path).write_text(code, encoding="utf-8")
+        print(f"[OK]  Written to {output_path}", file=sys.stderr)
     else:
         print(code)
 

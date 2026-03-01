@@ -7,10 +7,12 @@ from gis_codegen.generator import (
     generate_pyqgis, generate_arcpy,
     generate_qgs, generate_pyt,
 )
+from gis_codegen.layout import TemplateConfig, CompositionLayout
 
 __version__ = "0.1.0"
 __all__ = [
     "connect", "extract_schema",
     "generate_pyqgis", "generate_arcpy",
     "generate_qgs", "generate_pyt",
+    "TemplateConfig", "CompositionLayout",
 ]

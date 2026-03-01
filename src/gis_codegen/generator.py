@@ -12,6 +12,10 @@ import argparse
 import textwrap
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .layout import TemplateConfig
 
 
 # ---------------------------------------------------------------------------
@@ -607,8 +611,13 @@ def _arcpy_op_blocks(var: str, table: str, columns: list[dict], ops: set[str]) -
 # PyQGIS generator
 # ---------------------------------------------------------------------------
 
-def generate_pyqgis(schema: dict, db_config: dict,
-                    operations: list[str] | None = None) -> str:
+def generate_pyqgis(
+    schema: dict,
+    db_config: dict,
+    operations: list[str] | None = None,
+    template: "TemplateConfig | None" = None,
+    per_layer_ops: dict[str, list[str]] | None = None,
+) -> str:
     host     = db_config["host"]
     port     = db_config["port"]
     dbname   = db_config["dbname"]
@@ -617,11 +626,23 @@ def generate_pyqgis(schema: dict, db_config: dict,
 
     layers = schema["layers"]
     ops    = set(operations or [])
-    needs_processing = ops & {
-        "reproject", "buffer", "clip",
-        "dissolve", "centroid", "field_calc", "spatial_join", "intersect",
-        "scene_layer",
-    }
+
+    # If per_layer_ops provided, compute union of all ops for needs_processing check
+    if per_layer_ops:
+        all_ops = ops.copy()
+        for ops_list in per_layer_ops.values():
+            all_ops.update(ops_list)
+        needs_processing = all_ops & {
+            "reproject", "buffer", "clip",
+            "dissolve", "centroid", "field_calc", "spatial_join", "intersect",
+            "scene_layer",
+        }
+    else:
+        needs_processing = ops & {
+            "reproject", "buffer", "clip",
+            "dissolve", "centroid", "field_calc", "spatial_join", "intersect",
+            "scene_layer",
+        }
 
     lines = [
         f'"""',
@@ -657,15 +678,35 @@ def generate_pyqgis(schema: dict, db_config: dict,
         f'',
     ]
 
+    # Inject template preamble if provided
+    if template and template.preamble:
+        lines.append(template.preamble)
+        lines.append(f'')
+
+    # Inject template extra_imports if provided
+    if template and template.extra_imports:
+        lines.append(template.extra_imports)
+        lines.append(f'')
+
     for layer in layers:
         schema_name = layer["schema"]
         table       = layer["table"]
+        qualified_name = layer.get("qualified_name", f"{schema_name}.{table}")
         geom        = layer["geometry"]
         columns     = layer["columns"]
         pks         = layer["primary_keys"]
         var         = safe_var(table)
         pk_col      = pks[0] if pks else ""
         row_est     = layer.get("row_count_estimate", -1)
+
+        # Determine effective operations for this layer
+        layer_ops = per_layer_ops.get(qualified_name) if per_layer_ops else None
+        effective_ops = set(layer_ops) if layer_ops else ops
+
+        # Template settings
+        include_sample_rows = template.include_sample_rows if template else True
+        include_crs_info = template.include_crs_info if template else True
+        include_field_list = template.include_field_list if template else True
 
         field_comments = ", ".join(
             f'{c["name"]} ({pg_type_to_pyqgis(c["data_type"])})'
@@ -674,6 +715,14 @@ def generate_pyqgis(schema: dict, db_config: dict,
 
         # Cursor field list: primary key + all non-geom columns (first 10 for example)
         sample_fields = [c["name"] for c in columns[:10]]
+
+        # Inject per_layer_prefix if template provided
+        if template and template.per_layer_prefix:
+            prefix = template.substitute_placeholders(
+                template.per_layer_prefix, table, schema_name, qualified_name
+            )
+            lines.append(prefix)
+            lines.append(f'')
 
         lines += [
             f'# {"=" * 66}',
@@ -701,17 +750,28 @@ def generate_pyqgis(schema: dict, db_config: dict,
             f'    QgsProject.instance().addMapLayer(lyr_{var})',
             f'    print(f"[OK] {table}: {{lyr_{var}.featureCount()}} features")',
             f'',
-            f'    # CRS',
-            f'    crs = lyr_{var}.crs()',
-            f'    print(f"  CRS: {{crs.authid()}}  ({{crs.description()}})")',
-            f'',
-            f'    # Field names',
-            f'    fields = [f.name() for f in lyr_{var}.fields()]',
-            f'    print(f"  Fields: {{fields}}")',
-            f'',
         ]
 
-        if sample_fields:
+        # Conditionally include CRS info
+        if include_crs_info:
+            lines += [
+                f'    # CRS',
+                f'    crs = lyr_{var}.crs()',
+                f'    print(f"  CRS: {{crs.authid()}}  ({{crs.description()}})")',
+                f'',
+            ]
+
+        # Conditionally include field list
+        if include_field_list:
+            lines += [
+                f'    # Field names',
+                f'    fields = [f.name() for f in lyr_{var}.fields()]',
+                f'    print(f"  Fields: {{fields}}")',
+                f'',
+            ]
+
+        # Conditionally include sample rows
+        if include_sample_rows and sample_fields:
             quoted = ", ".join(f'"{f}"' for f in sample_fields)
             lines += [
                 f'    # --- Sample: iterate first 5 features ---',
@@ -722,7 +782,15 @@ def generate_pyqgis(schema: dict, db_config: dict,
                 f'',
             ]
 
-        lines.extend(_pyqgis_op_blocks(var, table, columns, ops))
+        lines.extend(_pyqgis_op_blocks(var, table, columns, effective_ops))
+
+        # Inject per_layer_suffix if template provided
+        if template and template.per_layer_suffix:
+            suffix = template.substitute_placeholders(
+                template.per_layer_suffix, table, schema_name, qualified_name
+            )
+            lines.append(suffix)
+            lines.append(f'')
 
         lines += [
             f'    # --- Example: spatial filter (bounding box) ---',
@@ -739,6 +807,11 @@ def generate_pyqgis(schema: dict, db_config: dict,
             f'',
         ]
 
+    # Inject template teardown if provided
+    if template and template.teardown:
+        lines.append(template.teardown)
+        lines.append(f'')
+
     lines += [
         f'# -- Cleanup (standalone only) ----------------------------------------',
         f'qgs.exitQgis()',
@@ -751,8 +824,13 @@ def generate_pyqgis(schema: dict, db_config: dict,
 # ArcPy generator
 # ---------------------------------------------------------------------------
 
-def generate_arcpy(schema: dict, db_config: dict,
-                   operations: list[str] | None = None) -> str:
+def generate_arcpy(
+    schema: dict,
+    db_config: dict,
+    operations: list[str] | None = None,
+    template: "TemplateConfig | None" = None,
+    per_layer_ops: dict[str, list[str]] | None = None,
+) -> str:
     host     = db_config["host"]
     port     = db_config["port"]
     dbname   = db_config["dbname"]
@@ -806,14 +884,34 @@ def generate_arcpy(schema: dict, db_config: dict,
         f'',
     ]
 
+    # Inject template preamble if provided
+    if template and template.preamble:
+        lines.append(template.preamble)
+        lines.append(f'')
+
+    # Inject template extra_imports if provided
+    if template and template.extra_imports:
+        lines.append(template.extra_imports)
+        lines.append(f'')
+
     for layer in layers:
         schema_name = layer["schema"]
         table       = layer["table"]
+        qualified_name = layer.get("qualified_name", f"{schema_name}.{table}")
         geom        = layer["geometry"]
         columns     = layer["columns"]
         pks         = layer["primary_keys"]
         var         = safe_var(table)
         row_est     = layer.get("row_count_estimate", -1)
+
+        # Determine effective operations for this layer
+        layer_ops = per_layer_ops.get(qualified_name) if per_layer_ops else None
+        effective_ops = set(layer_ops) if layer_ops else ops
+
+        # Template settings
+        include_sample_rows = template.include_sample_rows if template else True
+        include_crs_info = template.include_crs_info if template else True
+        include_field_list = template.include_field_list if template else True
 
         field_comments = ", ".join(
             f'{c["name"]} ({pg_type_to_arcpy(c["data_type"])})'
@@ -823,6 +921,14 @@ def generate_arcpy(schema: dict, db_config: dict,
         # Fields for SearchCursor sample (pk + first few attrs + SHAPE@)
         cursor_fields = pks[:1] + [c["name"] for c in columns[:4]] + ["SHAPE@"]
         cursor_fields_str = str(cursor_fields)
+
+        # Inject per_layer_prefix if template provided
+        if template and template.per_layer_prefix:
+            prefix = template.substitute_placeholders(
+                template.per_layer_prefix, table, schema_name, qualified_name
+            )
+            lines.append(prefix)
+            lines.append(f'')
 
         lines += [
             f'# {"=" * 66}',
@@ -837,21 +943,36 @@ def generate_arcpy(schema: dict, db_config: dict,
             f'if arcpy.Exists(fc_{var}):',
             f'    desc_{var} = arcpy.Describe(fc_{var})',
             f'    print(f"[OK] {table}")',
-            f'    print(f"  Geometry : {{desc_{var}.shapeType}}")',
-            f'    print(f"  CRS      : {{desc_{var}.spatialReference.name}}")',
-            f'',
-            f'    # List fields',
-            f'    fields_{var} = arcpy.ListFields(fc_{var})',
-            f'    for fld in fields_{var}:',
-            f'        print(f"  field: {{fld.name}} ({{fld.type}})")',
-            f'',
+        ]
+
+        # Conditionally include geometry and CRS info
+        if include_crs_info:
+            lines += [
+                f'    print(f"  Geometry : {{desc_{var}.shapeType}}")',
+                f'    print(f"  CRS      : {{desc_{var}.spatialReference.name}}")',
+                f'',
+            ]
+
+        # Conditionally include field list
+        if include_field_list:
+            lines += [
+                f'    # List fields',
+                f'    fields_{var} = arcpy.ListFields(fc_{var})',
+                f'    for fld in fields_{var}:',
+                f'        print(f"  field: {{fld.name}} ({{fld.type}})")',
+                f'',
+            ]
+
+        # Row count is included regardless (it's part of basic layer info)
+        lines += [
             f'    # Row count',
             f'    count_{var} = int(arcpy.management.GetCount(fc_{var})[0])',
             f'    print(f"  Rows: {{count_{var}}}")',
             f'',
         ]
 
-        if cursor_fields:
+        # Conditionally include sample rows
+        if include_sample_rows and cursor_fields:
             lines += [
                 f'    # --- Sample: iterate first 5 rows ---',
                 f'    with arcpy.da.SearchCursor(fc_{var}, {cursor_fields_str}) as cur_{var}:',
@@ -862,7 +983,15 @@ def generate_arcpy(schema: dict, db_config: dict,
                 f'',
             ]
 
-        lines.extend(_arcpy_op_blocks(var, table, columns, ops))
+        lines.extend(_arcpy_op_blocks(var, table, columns, effective_ops))
+
+        # Inject per_layer_suffix if template provided
+        if template and template.per_layer_suffix:
+            suffix = template.substitute_placeholders(
+                template.per_layer_suffix, table, schema_name, qualified_name
+            )
+            lines.append(suffix)
+            lines.append(f'')
 
         lines += [
             f'    # --- Example: SQL WHERE filter ---',
@@ -874,6 +1003,11 @@ def generate_arcpy(schema: dict, db_config: dict,
             f'    print(f"[ERROR] Layer \'{schema_name}.{table}\' not found in SDE connection.")',
             f'',
         ]
+
+    # Inject template teardown if provided
+    if template and template.teardown:
+        lines.append(template.teardown)
+        lines.append(f'')
 
     return "\n".join(lines)
 
