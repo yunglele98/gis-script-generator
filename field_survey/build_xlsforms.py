@@ -327,6 +327,79 @@ CONTACT_FORM = [
 ]
 
 
+# ── Form 6: Field Observation (Survey123 companion to Field Maps) ──────
+
+FIELD_OBS_CHOICES = {
+    "obs_type": [
+        ("vacancy_change", "Vacancy Change"),
+        ("new_business", "New Business"),
+        ("closure", "Business Closure"),
+        ("construction", "Construction Activity"),
+        ("deterioration", "Building Deterioration"),
+        ("heritage_concern", "Heritage Concern"),
+        ("streetscape", "Streetscape Issue"),
+        ("signage_change", "Signage Change"),
+        ("public_space", "Public Space Issue"),
+        ("other", "Other"),
+    ],
+    "severity": [("low", "Low"), ("medium", "Medium"), ("high", "High"), ("urgent", "Urgent")],
+    "obs_building_type": [
+        ("commercial", "Commercial"),
+        ("residential", "Residential"),
+        ("mixed_use", "Mixed Use"),
+        ("institutional", "Institutional"),
+        ("vacant_lot", "Vacant Lot"),
+        ("public_space", "Public Space"),
+    ],
+    "obs_condition": [("1", "1 - Critical"), ("2", "2 - Poor"), ("3", "3 - Fair"), ("4", "4 - Good"), ("5", "5 - Excellent")],
+    "obs_vacancy": [
+        ("occupied", "Occupied / Active"),
+        ("vacant_storefront", "Vacant Storefront"),
+        ("vacant_building", "Vacant Building"),
+        ("under_renovation", "Under Renovation"),
+        ("transitioning", "Transitioning"),
+    ],
+    "change_type": [
+        ("new", "New (not in database)"),
+        ("changed", "Changed since last data"),
+        ("confirmed", "Confirmed same as database"),
+        ("demolished", "Demolished / Removed"),
+    ],
+}
+
+INLINE_CHOICES.update(FIELD_OBS_CHOICES)
+
+FIELD_OBSERVATION_SURVEY = [
+    _note("**Kensington Field Observation**\n\nQuick observation form for ground-truthing and new findings."),
+    _group("metadata", "Observation Info"),
+    _select("surveyor_id", "Surveyor", "surveyor"),
+    {"type": "dateTime", "name": "survey_timestamp", "label": "Date/Time", "default": "now()"},
+    {"type": "geopoint", "name": "gps_location", "label": "Location", "required": "yes"},
+    _select("block_location", "Block", "block_location", appearance="search"),
+    _select("street_address", "Nearest Address", "street_address", appearance="search"),
+    {"type": "hidden", "name": "form_version", "label": "Form Version", "default": "1.0"},
+    _end(),
+    _group("observation", "What Did You Observe?"),
+    _select("observation_type", "Observation Type", "obs_type"),
+    _select("change_type", "Is this new or a change?", "change_type"),
+    _select("severity", "Severity / Priority", "severity"),
+    _end(),
+    _group("building", "Building Details"),
+    _select("building_type", "Building Type", "obs_building_type"),
+    _select("condition_rating", "Condition", "obs_condition"),
+    _select("vacancy_status", "Vacancy", "obs_vacancy"),
+    _select("business_category", "Business Type (if commercial)", "business_type", required="no"),
+    _text("business_name_observed", "Business Name (if visible)", required="no"),
+    _end(),
+    _group("detail", "Details"),
+    _text("description", "Describe what you observed", required="yes"),
+    {"type": "image", "name": "photo", "label": "Photo"},
+    {"type": "image", "name": "photo2", "label": "Photo 2", "required": "no"},
+    _text("field_notes", "Additional Notes", required="no"),
+    _end(),
+]
+
+
 # ── XLSForm writer ─────────────────────────────────────────────────────
 
 def _write_xlsform(form_fields, form_title, outfile, choices_dir=None):
@@ -406,6 +479,7 @@ def main():
         (INTERCEPT_SURVEY, "Kensington Intercept Survey", "intercept_survey.xlsx"),
         (STUDENT_SURVEY, "UofT Student Survey", "student_survey.xlsx"),
         (CONTACT_FORM, "Follow-up Contact", "contact_followup.xlsx"),
+        (FIELD_OBSERVATION_SURVEY, "Kensington Field Observation", "field_observation.xlsx"),
     ]
 
     for fields, title, filename in forms:
