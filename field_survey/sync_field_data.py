@@ -6,7 +6,7 @@ Usage:
         --config field_survey/sync_config.json \
         --db-password test123
 
-Requires: arcgis, psycopg
+Requires: requests, psycopg
 """
 import argparse
 import json
@@ -16,6 +16,7 @@ import sys
 from datetime import datetime, timezone
 
 import psycopg
+import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -62,6 +63,9 @@ def transform_feature(feature: dict, include_geom: bool = False) -> dict:
     for k, v in feature.get("attributes", {}).items():
         if k in SKIP_FIELDS:
             continue
+        # Skip note fields (XLSForm display-only, not stored in PostGIS)
+        if k.lower().startswith("note_"):
+            continue
         # Convert AGOL epoch timestamps to datetime
         if isinstance(v, int) and v > 1_000_000_000_000:
             v = datetime.fromtimestamp(v / 1000, tz=timezone.utc).isoformat()
@@ -79,18 +83,28 @@ def transform_feature(feature: dict, include_geom: bool = False) -> dict:
 
 def sync_layer(conn, layer_url: str, table: str, include_geom: bool = False, token: str = None):
     """Pull all features from an AGOL feature layer and upsert into PostGIS."""
-    try:
-        from arcgis.features import FeatureLayer
-    except ImportError:
-        log.error("arcgis package not installed. Run: pip install arcgis")
-        sys.exit(1)
-
     log.info(f"Syncing {layer_url} -> {table}")
 
-    fl = FeatureLayer(layer_url, token=token)
-    # Request EPSG 2952 so coordinates match PostGIS schema
-    result = fl.query(where="1=1", out_fields="*", return_geometry=include_geom, out_sr=2952)
-    features = json.loads(result.to_json).get("features", [])
+    params = {
+        "where": "1=1",
+        "outFields": "*",
+        "returnGeometry": str(include_geom).lower(),
+        "outSR": 2952,
+        "f": "json",
+    }
+    if token:
+        params["token"] = token
+
+    headers = {"Referer": "https://fieldsurvey.local"} if token else {}
+    resp = requests.get(f"{layer_url}/query", params=params, headers=headers, timeout=120)
+    resp.raise_for_status()
+    data = resp.json()
+
+    if "error" in data:
+        log.error(f"AGOL error: {data['error']}")
+        return 0
+
+    features = data.get("features", [])
 
     if not features:
         log.warning(f"No features returned from {layer_url}")
@@ -99,8 +113,21 @@ def sync_layer(conn, layer_url: str, table: str, include_geom: bool = False, tok
     # Transform all features
     rows = [transform_feature(f, include_geom) for f in features]
 
-    # Use columns from first row
-    columns = list(rows[0].keys())
+    # Filter columns to only those that exist in the target table
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s",
+        (table.split(".")[0], table.split(".")[1]),
+    )
+    db_columns = {r[0] for r in cur.fetchall()}
+    all_columns = list(rows[0].keys())
+    columns = [c for c in all_columns if c in db_columns]
+    skipped_cols = set(all_columns) - set(columns)
+    if skipped_cols:
+        log.info(f"Skipping columns not in {table}: {skipped_cols}")
+    # Keep only known columns in each row
+    rows = [{k: v for k, v in row.items() if k in db_columns} for row in rows]
 
     # Check form versions
     for row in rows:
@@ -118,7 +145,6 @@ def sync_layer(conn, layer_url: str, table: str, include_geom: bool = False, tok
 
     sql = build_upsert_sql(table, columns)
 
-    cur = conn.cursor()
     count = 0
     for row in rows:
         try:

@@ -1,0 +1,24 @@
+{
+    "layers": {
+        "resident": {
+            "url": "https://services6.arcgis.com/133a00biU9FItiqJ/arcgis/rest/services/service_19ca210fff7240229d0cb3e4745f6eb0/FeatureServer/0",
+            "geom": false
+        },
+        "business": {
+            "url": "https://services6.arcgis.com/133a00biU9FItiqJ/arcgis/rest/services/service_dfb0dc55eb4741bab9e7e0f35559bae9/FeatureServer/0",
+            "geom": true
+        },
+        "intercept": {
+            "url": "https://services6.arcgis.com/133a00biU9FItiqJ/arcgis/rest/services/service_777b4c2c4c894383b60a7e89537930ff/FeatureServer/0",
+            "geom": false
+        },
+        "student": {
+            "url": "https://services6.arcgis.com/133a00biU9FItiqJ/arcgis/rest/services/service_82a0a794cdd54e2da9cca4d715924788/FeatureServer/0",
+            "geom": false
+        },
+        "contact": {
+            "url": "https://services6.arcgis.com/133a00biU9FItiqJ/arcgis/rest/services/service_9f1123b11dc5498ba14fcee11052dd95_form/FeatureServer/0",
+            "geom": false
+        }
+    }
+}
