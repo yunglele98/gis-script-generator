@@ -1,0 +1,28 @@
+{
+    "layers": {
+        "resident": {
+            "url": "https://services.arcgis.com/YOUR_ORG/arcgis/rest/services/Resident_Survey/FeatureServer/0",
+            "geom": false
+        },
+        "business": {
+            "url": "https://services.arcgis.com/YOUR_ORG/arcgis/rest/services/Business_Survey/FeatureServer/0",
+            "geom": true
+        },
+        "intercept": {
+            "url": "https://services.arcgis.com/YOUR_ORG/arcgis/rest/services/Intercept_Survey/FeatureServer/0",
+            "geom": false
+        },
+        "student": {
+            "url": "https://services.arcgis.com/YOUR_ORG/arcgis/rest/services/Student_Survey/FeatureServer/0",
+            "geom": false
+        },
+        "field_obs": {
+            "url": "https://services.arcgis.com/YOUR_ORG/arcgis/rest/services/Field_Maps/FeatureServer/0",
+            "geom": true
+        },
+        "contact": {
+            "url": "https://services.arcgis.com/YOUR_ORG/arcgis/rest/services/Contact_Followup/FeatureServer/0",
+            "geom": false
+        }
+    }
+}
