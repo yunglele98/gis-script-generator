@@ -28,20 +28,21 @@ of the installable package.
 ```
 gis-script-generator/
 ├── src/gis_codegen/          # Installable package
-│   ├── __init__.py           # Public API: connect, extract_schema, generate_*
+│   ├── __init__.py           # Public API: connect, extract_schema, generate_*, layout classes
 │   ├── extractor.py          # PostGIS metadata queries (read-only connection)
 │   ├── generator.py          # Code generation for all 8 platforms
+│   ├── layout.py             # TemplateConfig, CompositionLayout, MetadataOverlay
 │   ├── catalogue.py          # Excel-driven per-map code generation (gis-catalogue CLI)
 │   ├── cli.py                # gis-codegen CLI entry point
 │   └── app.py                # Flask web UI (gis-ui entry point)
 ├── tests/
 │   ├── conftest.py
-│   ├── test_generator.py     # 173 tests — safe_var, type maps, op blocks, generators
-│   ├── test_catalogue.py     # 108 tests — load/filter, renderer blocks, symbology
-│   ├── test_extractor.py     # 34 tests  — fetch_columns, PKs, extract_schema
+│   ├── test_generator.py     # 157 tests — safe_var, type maps, op blocks, generators
+│   ├── test_catalogue.py     # 152 tests — load/filter, renderer blocks, symbology
+│   ├── test_extractor.py     # 35 tests  — fetch_columns, PKs, extract_schema
+│   ├── test_layout.py        # 51 tests  — template inheritance, filters, metadata
 │   ├── test_app.py           # 11 tests  — Flask routes, form, download, errors
-│   ├── test_integration.py   # 19 tests  — live PostGIS via testcontainers (Docker)
-│   └── Tree_Perc_Ash_Catcher.py  # Unrelated script (moved to misc later if needed)
+│   └── test_integration.py   # 19 tests  — live PostGIS via testcontainers (Docker)
 ├── .github/workflows/
 │   └── ci.yml                # Unit + integration CI jobs
 ├── pyproject.toml            # Package metadata, deps, pytest config, coverage
@@ -73,6 +74,7 @@ gis-script-generator/
 ├── QGIS_PLUGINS.md           # Recommended QGIS plugins
 ├── KENSINGTON_PROJECT_REPORT.html  # HTML project report
 └── misc/                     # Miscellaneous/unrelated files
+    └── Tree_Perc_Ash_Catcher.py
 ```
 
 ---
@@ -88,6 +90,11 @@ PostGIS DB
 extractor.py      → connect(), extract_schema()  →  schema dict (JSON structure)
     │
     ▼
+layout.py         → TemplateConfig   (custom code injection, TOML with inheritance)
+                  → CompositionLayout (layer filtering + per-layer operations)
+                  → MetadataOverlay   (layer enrichment by table name)
+    │
+    ▼
 generator.py      → generate_pyqgis / generate_arcpy / generate_folium /
                     generate_kepler / generate_deck / generate_export /
                     generate_qgs / generate_pyt
@@ -97,6 +104,28 @@ cli.py            → gis-codegen  (CLI entry point)
 catalogue.py      → gis-catalogue (Excel-driven batch generation)
 app.py            → gis-ui       (Flask web UI, localhost:5000)
 ```
+
+### Layout System (`layout.py`)
+
+Three-layered configuration system for advanced generation control:
+
+**TemplateConfig** — Custom code injection via TOML files:
+- Fields: `name`, `preamble`, `extra_imports`, `per_layer_prefix`, `per_layer_suffix`, `teardown`
+- Section toggles: `include_sample_rows`, `include_crs_info`, `include_field_list`
+- Supports inheritance via `extends` key with circular dependency detection
+- Placeholder substitution: `{table}`, `{schema}`, `{qualified_name}`
+- Loaded via `--template FILE` on the CLI
+
+**CompositionLayout** — Layer selection and per-layer operations:
+- Layer whitelist + reordering
+- Attribute filters: `filter_geom_types`, `filter_srid`, `filter_min_rows`,
+  `filter_max_rows`, `filter_schemas`, `filter_exclude_tables`
+- Per-layer operation mapping via `per_layer_ops()` → `{qualified_name: [ops]}`
+- Loaded via `--layout FILE` on the CLI
+
+**MetadataOverlay** — Layer enrichment:
+- Merges extra metadata fields into matching layers by table name
+- Loaded via `--metadata FILE` on the CLI
 
 ### Schema Dict Structure
 
@@ -231,7 +260,7 @@ covered by integration tests instead.
 ### CI
 
 Two jobs in `.github/workflows/ci.yml`:
-- **unit**: Python 3.11, `pip install -e ".[dev,server]"`, runs all non-integration tests
+- **unit**: Python 3.10, 3.11, 3.12 matrix, `pip install -e ".[dev,server]"`, runs all non-integration tests
 - **integration**: Python 3.11, `pip install -e ".[dev,integration]"`, runs `test_integration.py`
 
 CI triggers on push to `main`/`master` and on all pull requests.
@@ -301,12 +330,13 @@ don't support them (`folium`, `kepler`, `deck`, `export`, `qgs`, `pyt`).
 
 | File | Count | Scope |
 |---|---|---|
-| `test_generator.py` | 173 | `safe_var`, type maps, 15 op blocks × 2 platforms, all 8 generators |
-| `test_catalogue.py` | 108 | Load/filter, 10 renderer blocks, symbology dispatch, both generators |
-| `test_extractor.py` | 34 | `fetch_columns`, `fetch_primary_keys`, `extract_schema` |
+| `test_generator.py` | 157 | `safe_var`, type maps, 15 op blocks × 2 platforms, all 8 generators |
+| `test_catalogue.py` | 152 | Load/filter, 10 renderer blocks (5 PyQGIS + 5 ArcPy), symbology dispatch, both generators |
+| `test_layout.py` | 51 | Template inheritance, composition filters (geom type, SRID, row count, schema, exclusion), metadata merging |
+| `test_extractor.py` | 35 | `fetch_columns`, `fetch_primary_keys`, `extract_schema` |
 | `test_app.py` | 11 | Flask routes, form rendering, file download, error handling |
 | `test_integration.py` | 19 | Live PostGIS via testcontainers (Docker required) |
-| **Total** | **345** | |
+| **Total** | **425** | |
 
 Unit tests (all except `test_integration.py`) require no database or Docker.
 
