@@ -3,7 +3,6 @@ Tests for gis_codegen.layout — template and composition configuration.
 """
 
 import pytest
-from pathlib import Path
 from gis_codegen.layout import TemplateConfig, CompositionLayout
 
 

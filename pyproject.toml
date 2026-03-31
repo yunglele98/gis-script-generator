@@ -51,3 +51,16 @@ omit = ["*/cli.py"]   # CLI entry point requires a live DB; covered by integrati
 
 [tool.coverage.report]
 fail_under = 80
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "F541",  # f-strings without placeholders are intentional in code-gen templates
+    "E501",  # line length — generated code templates require long f-strings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E741"]  # allow short variable names in tests

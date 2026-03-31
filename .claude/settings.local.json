@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "mcp__filesystem__read_text_file",
+      "Bash(ls:*)"
+    ]
+  }
+}

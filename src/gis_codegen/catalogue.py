@@ -206,8 +206,9 @@ def _points_polygons_block(var: str) -> list[str]:
     ]
 
 
-def _symbology_block(var: str, m: dict) -> list[str]:
-    """Dispatch to the appropriate renderer block based on symbology_type."""
+def _symbology_dispatch(var: str, m: dict, renderers: dict,
+                        fallback_hint: str) -> list[str]:
+    """Shared dispatch for symbology blocks — routes to platform-specific renderers."""
     stype   = (m.get("symbology_type") or "").lower()
     classif = (m.get("classification") or "")
     lines   = [
@@ -215,31 +216,48 @@ def _symbology_block(var: str, m: dict) -> list[str]:
     ]
 
     if "heatmap" in stype or "densité" in stype:
-        lines += _heatmap_block(var)
+        lines += renderers["heatmap"](var)
 
     elif "réseau" in stype or "network" in stype:
-        lines += _network_line_block(var)
+        lines += renderers["network_line"](var)
 
     elif ("catégoriel" in stype or "catégorie" in stype) and "choroplèthe" not in stype:
-        lines += _categorized_block(var, "type", classif)
+        lines += renderers["categorized"](var, "type", classif)
 
     elif "choroplèthe" in stype or "dégradé" in stype or "gradué" in stype:
         if "catégoriel" in stype:
-            lines += _categorized_block(var, "type", classif)
+            lines += renderers["categorized"](var, "type", classif)
         else:
-            lines += _graduated_block(var, classif or "value")
+            lines += renderers["graduated"](var, classif or "value")
 
     elif "points" in stype or "polygones" in stype:
-        lines += _points_polygons_block(var)
+        lines += renderers["points_polygons"](var)
 
     else:
         lines += [
             f'    # TODO: configure renderer',
             f'    # Symbology type: {m.get("symbology_type")}',
-            f'    # Use Layer Properties → Symbology in QGIS to configure interactively.',
+            f'    # {fallback_hint}',
         ]
 
     return lines
+
+
+_PYQGIS_RENDERERS = {
+    "graduated": _graduated_block,
+    "categorized": _categorized_block,
+    "heatmap": _heatmap_block,
+    "network_line": _network_line_block,
+    "points_polygons": _points_polygons_block,
+}
+
+
+def _symbology_block(var: str, m: dict) -> list[str]:
+    """Dispatch to the appropriate PyQGIS renderer block based on symbology_type."""
+    return _symbology_dispatch(
+        var, m, _PYQGIS_RENDERERS,
+        "Use Layer Properties → Symbology in QGIS to configure interactively.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -303,40 +321,21 @@ def _arcpy_points_polygons_block(var: str) -> list[str]:
     ]
 
 
+_ARCPY_RENDERERS = {
+    "graduated": _arcpy_graduated_block,
+    "categorized": _arcpy_categorized_block,
+    "heatmap": _arcpy_heatmap_block,
+    "network_line": _arcpy_network_line_block,
+    "points_polygons": _arcpy_points_polygons_block,
+}
+
+
 def _arcpy_symbology_block(var: str, m: dict) -> list[str]:
     """Dispatch to the appropriate ArcPy renderer block based on symbology_type."""
-    stype   = (m.get("symbology_type") or "").lower()
-    classif = (m.get("classification") or "")
-    lines   = [
-        f'    # --- Symbology: {m.get("symbology_type", "(unknown)")} ---',
-    ]
-
-    if "heatmap" in stype or "densité" in stype:
-        lines += _arcpy_heatmap_block(var)
-
-    elif "réseau" in stype or "network" in stype:
-        lines += _arcpy_network_line_block(var)
-
-    elif ("catégoriel" in stype or "catégorie" in stype) and "choroplèthe" not in stype:
-        lines += _arcpy_categorized_block(var, "type", classif)
-
-    elif "choroplèthe" in stype or "dégradé" in stype or "gradué" in stype:
-        if "catégoriel" in stype:
-            lines += _arcpy_categorized_block(var, "type", classif)
-        else:
-            lines += _arcpy_graduated_block(var, classif or "value")
-
-    elif "points" in stype or "polygones" in stype:
-        lines += _arcpy_points_polygons_block(var)
-
-    else:
-        lines += [
-            f'    # TODO: configure renderer',
-            f'    # Symbology type: {m.get("symbology_type")}',
-            f'    # Use Layer Properties → Symbology in ArcGIS Pro.',
-        ]
-
-    return lines
+    return _symbology_dispatch(
+        var, m, _ARCPY_RENDERERS,
+        "Use Layer Properties → Symbology in ArcGIS Pro.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +355,6 @@ def generate_map_pyqgis(m: dict, db_config: dict,
     indicators = m.get("key_indicators", "")
     scale      = m.get("study_scale", "")
     unit       = m.get("unit_of_analysis", "")
-    classif    = m.get("classification", "")
     sources    = m.get("data_sources", "")
     vintage    = m.get("data_vintage", "")
     processing = m.get("processing_steps", "")

@@ -625,6 +625,134 @@ class TestGenerateExport:
 
 
 # ---------------------------------------------------------------------------
+# Web mapping — content validation
+# ---------------------------------------------------------------------------
+
+class TestFoliumContent:
+    def test_sql_queries_reference_schema_and_table(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert '"public"."parcels"' in code
+        assert '"public"."roads"' in code
+
+    def test_db_constants_match_config(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert f'DB_HOST     = "{db_config["host"]}"' in code
+        assert f'DB_PORT     = {db_config["port"]}' in code
+        assert f'DB_NAME     = "{db_config["dbname"]}"' in code
+
+    def test_layer_header_shows_geom_type_and_srid(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert "MULTIPOLYGON, SRID 4326" in code
+        assert "MULTILINESTRING, SRID 4326" in code
+
+    def test_tooltip_uses_column_names(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert "parcel_id" in code
+        assert "address" in code
+
+    def test_polygon_style_has_fill(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert "fillColor" in code
+        assert "fillOpacity" in code
+
+    def test_line_style_has_weight(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert '"weight": 2' in code
+
+    def test_map_center_from_first_layer(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert "gdf_parcels.total_bounds" in code
+
+    def test_cartodb_positron_tiles(self, schema, db_config):
+        code = generate_folium(schema, db_config)
+        assert "CartoDB positron" in code
+
+    def test_single_layer_still_works(self, single_layer_schema, db_config):
+        code = generate_folium(single_layer_schema, db_config)
+        assert "gdf_parcels" in code
+        assert "gdf_roads" not in code
+
+
+class TestKeplerContent:
+    def test_sql_queries_reference_schema_and_table(self, schema, db_config):
+        code = generate_kepler(schema, db_config)
+        assert '"public"."parcels"' in code
+        assert '"public"."roads"' in code
+
+    def test_db_constants_match_config(self, schema, db_config):
+        code = generate_kepler(schema, db_config)
+        assert f'DB_HOST     = "{db_config["host"]}"' in code
+        assert f'DB_NAME     = "{db_config["dbname"]}"' in code
+
+    def test_both_layers_added_to_map(self, schema, db_config):
+        code = generate_kepler(schema, db_config)
+        assert code.count("map_k.add_data") == 2
+
+    def test_layer_names_in_add_data(self, schema, db_config):
+        code = generate_kepler(schema, db_config)
+        assert 'name="parcels"' in code
+        assert 'name="roads"' in code
+
+    def test_output_html_defined(self, schema, db_config):
+        code = generate_kepler(schema, db_config)
+        assert "OUTPUT_HTML" in code
+        assert "kepler_map.html" in code
+
+    def test_single_layer_schema(self, single_layer_schema, db_config):
+        code = generate_kepler(single_layer_schema, db_config)
+        assert code.count("map_k.add_data") == 1
+        assert 'name="parcels"' in code
+
+
+class TestDeckContent:
+    def test_sql_queries_reference_schema_and_table(self, schema, db_config):
+        code = generate_deck(schema, db_config)
+        assert '"public"."parcels"' in code
+        assert '"public"."roads"' in code
+
+    def test_db_constants_match_config(self, schema, db_config):
+        code = generate_deck(schema, db_config)
+        assert f'DB_HOST     = "{db_config["host"]}"' in code
+        assert f'DB_NAME     = "{db_config["dbname"]}"' in code
+
+    def test_initial_view_state(self, schema, db_config):
+        code = generate_deck(schema, db_config)
+        assert "pdk.ViewState" in code
+
+    def test_line_layer_uses_geojson_layer(self, schema, db_config):
+        code = generate_deck(schema, db_config)
+        # Both polygon and line layers use GeoJsonLayer
+        assert code.count("GeoJsonLayer") == 2
+
+    def test_polygon_layer_uses_geojson_layer(self, schema, db_config):
+        code = generate_deck(schema, db_config)
+        assert "GeoJsonLayer" in code
+
+    def test_layers_appended_to_list(self, schema, db_config):
+        code = generate_deck(schema, db_config)
+        assert code.count("_deck_layers.append") == 2
+
+    def test_single_layer_schema(self, single_layer_schema, db_config):
+        code = generate_deck(single_layer_schema, db_config)
+        assert code.count("_deck_layers.append") == 1
+
+
+class TestExportContent:
+    def test_sql_queries_reference_schema_and_table(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert '"public"."parcels"' in code
+        assert '"public"."roads"' in code
+
+    def test_geom_column_in_read_postgis(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert 'geom_col="geom"' in code
+
+    def test_layer_count_in_docstring(self, schema, db_config):
+        code = generate_export(schema, db_config)
+        assert "Layers   : 2" in code
+
+
+# ---------------------------------------------------------------------------
 # _qgs_geom_type
 # ---------------------------------------------------------------------------
 
@@ -745,6 +873,27 @@ class TestGenerateQgs:
         xml = generate_qgs(empty_schema, db_config)
         assert "<qgis " in xml
         assert "<maplayer" not in xml
+
+    def test_project_crs_from_schema_srid(self, db_config):
+        schema_2952 = {
+            "database": "test_db", "layer_count": 1,
+            "layers": [{
+                "schema": "public", "table": "buildings",
+                "qualified_name": "public.buildings",
+                "geometry": {"column": "geom", "type": "POLYGON", "srid": 2952},
+                "columns": [{"name": "gid", "data_type": "integer", "nullable": False}],
+                "primary_keys": ["gid"],
+            }],
+        }
+        xml = generate_qgs(schema_2952, db_config)
+        assert "<authid>EPSG:2952</authid>" in xml
+        assert "meters" in xml
+
+    def test_empty_layers_falls_back_to_4326(self, db_config):
+        empty_schema = {"database": "test_db", "layer_count": 0, "layers": []}
+        xml = generate_qgs(empty_schema, db_config)
+        assert "EPSG:4326" in xml
+        assert "degrees" in xml
 
 
 # ---------------------------------------------------------------------------

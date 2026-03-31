@@ -10,22 +10,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
-def _load_toml_module():
-    """Load tomllib (Python 3.11+) or tomli fallback."""
-    try:
-        import tomllib
-        return tomllib
-    except ImportError:
-        pass
-    try:
-        import tomli as tomllib
-        return tomllib
-    except ImportError:
-        return None
-
-
-TOMLLIB = _load_toml_module()
+from gis_codegen.utils import TOMLLIB
 
 
 @dataclass

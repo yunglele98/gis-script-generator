@@ -1,7 +1,6 @@
 """Tests for gis_codegen.extractor module."""
 
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 from gis_codegen.extractor import (
     DB_CONFIG,
     fetch_columns,

@@ -9,7 +9,6 @@ import hashlib
 import json
 import sys
 import argparse
-import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -86,525 +85,552 @@ VALID_OPERATIONS = [
 ]
 
 
-def _pyqgis_op_blocks(var: str, table: str, columns: list[dict], ops: set[str]) -> list[str]:
-    """Return 4-space-indented lines for each requested PyQGIS operation."""
+def _op_blocks(var: str, table: str, columns: list[dict], ops: set[str],
+               registry: dict) -> list[str]:
+    """Dispatch requested operations through *registry* and return indented lines."""
     lines = []
     first_col = columns[0]["name"] if columns else "field_name"
-
-    if "reproject" in ops:
-        lines += [
-            f'    # --- reproject ---',
-            f'    # TODO: change "EPSG:4326" to your target CRS',
-            f'    _target_crs_{var} = QgsCoordinateReferenceSystem("EPSG:4326")',
-            f'    _reproj_{var} = processing.run("native:reprojectlayer", {{',
-            f'        "INPUT":      lyr_{var},',
-            f'        "TARGET_CRS": _target_crs_{var},',
-            f'        "OUTPUT":     "memory:",',
-            f'    }})',
-            f'    lyr_{var}_reprojected = _reproj_{var}["OUTPUT"]',
-            f'    print(f"  Reprojected: {{lyr_{var}_reprojected.featureCount()}} features")',
-            f'',
-        ]
-
-    if "export" in ops:
-        lines += [
-            f'    # --- export to GeoJSON ---',
-            f'    # TODO: change output path',
-            f'    from qgis.core import QgsVectorFileWriter',
-            f'    _out_{var} = f"/tmp/{table}.geojson"',
-            f'    _err_{var}, _msg_{var} = QgsVectorFileWriter.writeAsVectorFormat(',
-            f'        lyr_{var}, _out_{var}, "utf-8", lyr_{var}.crs(), "GeoJSON",',
-            f'    )',
-            f'    if _err_{var} == QgsVectorFileWriter.NoError:',
-            f'        print(f"  Exported to {{_out_{var}}}")',
-            f'    else:',
-            f'        print(f"  Export error: {{_msg_{var}}}")',
-            f'',
-        ]
-
-    if "buffer" in ops:
-        lines += [
-            f'    # --- buffer ---',
-            f'    # TODO: set DISTANCE in layer CRS units',
-            f'    _buf_{var} = processing.run("native:buffer", {{',
-            f'        "INPUT":         lyr_{var},',
-            f'        "DISTANCE":      100,',
-            f'        "SEGMENTS":      5,',
-            f'        "END_CAP_STYLE": 0,',
-            f'        "JOIN_STYLE":    0,',
-            f'        "MITER_LIMIT":   2,',
-            f'        "DISSOLVE":      False,',
-            f'        "OUTPUT":        "memory:",',
-            f'    }})',
-            f'    lyr_{var}_buffer = _buf_{var}["OUTPUT"]',
-            f'    print(f"  Buffer: {{lyr_{var}_buffer.featureCount()}} features")',
-            f'',
-        ]
-
-    if "clip" in ops:
-        lines += [
-            f'    # --- clip ---',
-            f'    # TODO: define clip_layer_{var}, then uncomment',
-            f'    # clip_layer_{var} = QgsVectorLayer("/path/to/boundary.shp", "boundary", "ogr")',
-            f'    # _clip_{var} = processing.run("native:clip", {{',
-            f'    #     "INPUT":   lyr_{var},',
-            f'    #     "OVERLAY": clip_layer_{var},',
-            f'    #     "OUTPUT":  "memory:",',
-            f'    # }})',
-            f'    # lyr_{var}_clipped = _clip_{var}["OUTPUT"]',
-            f'    # print(f"  Clipped: {{lyr_{var}_clipped.featureCount()}} features")',
-            f'',
-        ]
-
-    if "select" in ops:
-        expr = f'"{first_col}" IS NOT NULL'
-        lines += [
-            f'    # --- select by attribute ---',
-            f'    # TODO: update expression',
-            f"    lyr_{var}.selectByExpression('{expr}')",
-            f'    print(f"  Selected: {{lyr_{var}.selectedFeatureCount()}} features")',
-            f'    lyr_{var}.removeSelection()',
-            f'',
-        ]
-
-    if "dissolve" in ops:
-        lines += [
-            f'    # --- dissolve ---',
-            f'    # TODO: set FIELD list (empty = dissolve all into one feature)',
-            f'    _diss_{var} = processing.run("native:dissolve", {{',
-            f'        "INPUT":  lyr_{var},',
-            f'        "FIELD":  [],  # e.g. ["district_name"]',
-            f'        "OUTPUT": "memory:",',
-            f'    }})',
-            f'    lyr_{var}_dissolved = _diss_{var}["OUTPUT"]',
-            f'    print(f"  Dissolved: {{lyr_{var}_dissolved.featureCount()}} features")',
-            f'',
-        ]
-
-    if "centroid" in ops:
-        lines += [
-            f'    # --- centroid ---',
-            f'    _cent_{var} = processing.run("native:centroids", {{',
-            f'        "INPUT":     lyr_{var},',
-            f'        "ALL_PARTS": False,',
-            f'        "OUTPUT":    "memory:",',
-            f'    }})',
-            f'    lyr_{var}_centroids = _cent_{var}["OUTPUT"]',
-            f'    print(f"  Centroids: {{lyr_{var}_centroids.featureCount()}} points")',
-            f'',
-        ]
-
-    if "field_calc" in ops:
-        lines += [
-            f'    # --- field calculator ---',
-            f'    # TODO: set FIELD_NAME and FORMULA (uses QGIS expression syntax)',
-            f'    _calc_{var} = processing.run("native:fieldcalculator", {{',
-            f'        "INPUT":           lyr_{var},',
-            f'        "FIELD_NAME":      "new_field",  # TODO: change',
-            f'        "FIELD_TYPE":      0,            # 0=float, 1=int, 2=string',
-            f'        "FIELD_LENGTH":    20,',
-            f'        "FIELD_PRECISION": 3,',
-            f'        "FORMULA":         "$area",      # TODO: change expression',
-            f'        "OUTPUT":          "memory:",',
-            f'    }})',
-            f'    lyr_{var}_calculated = _calc_{var}["OUTPUT"]',
-            f'    print(f"  Field calculated: {{lyr_{var}_calculated.featureCount()}} features")',
-            f'',
-        ]
-
-    if "spatial_join" in ops:
-        lines += [
-            f'    # --- spatial join ---',
-            f'    # TODO: define join_layer_{var}, then uncomment',
-            f'    # join_layer_{var} = QgsVectorLayer("/path/to/join.shp", "join", "ogr")',
-            f'    # _sjoin_{var} = processing.run("native:joinattributesbylocation", {{',
-            f'    #     "INPUT":              lyr_{var},',
-            f'    #     "JOIN":               join_layer_{var},',
-            f'    #     "PREDICATE":          [0],  # 0=intersects, 1=contains, 2=equals',
-            f'    #     "JOIN_FIELDS":        [],   # empty = all fields',
-            f'    #     "METHOD":             1,    # 1=first match, 2=largest overlap',
-            f'    #     "DISCARD_NONMATCHING": False,',
-            f'    #     "OUTPUT":             "memory:",',
-            f'    # }})',
-            f'    # lyr_{var}_joined = _sjoin_{var}["OUTPUT"]',
-            f'    # print(f"  Spatial join: {{lyr_{var}_joined.featureCount()}} features")',
-            f'',
-        ]
-
-    if "intersect" in ops:
-        lines += [
-            f'    # --- intersect ---',
-            f'    # TODO: define overlay_layer_{var}, then uncomment',
-            f'    # overlay_layer_{var} = QgsVectorLayer("/path/to/overlay.shp", "overlay", "ogr")',
-            f'    # _isect_{var} = processing.run("native:intersection", {{',
-            f'    #     "INPUT":          lyr_{var},',
-            f'    #     "OVERLAY":        overlay_layer_{var},',
-            f'    #     "INPUT_FIELDS":   [],',
-            f'    #     "OVERLAY_FIELDS": [],',
-            f'    #     "OUTPUT":         "memory:",',
-            f'    # }})',
-            f'    # lyr_{var}_intersected = _isect_{var}["OUTPUT"]',
-            f'    # print(f"  Intersect: {{lyr_{var}_intersected.featureCount()}} features")',
-            f'',
-        ]
-
-    # ------------------------------------------------------------------
-    # 3D massing operations
-    # ------------------------------------------------------------------
-
-    if "extrude" in ops:
-        lines += [
-            f'    # --- 3D extrude ---',
-            f'    # Applies a data-defined extrusion renderer to the layer.',
-            f'    # TODO: set HEIGHT_FIELD to your building height attribute.',
-            f'    from qgis.core import (',
-            f'        QgsPolygon3DSymbol, QgsVectorLayer3DRenderer,',
-            f'        QgsAbstract3DSymbol, QgsProperty,',
-            f'    )',
-            f'    _HEIGHT_FIELD_{var} = "height"  # TODO: change',
-            f'    _sym3d_{var} = QgsPolygon3DSymbol()',
-            f'    _ddp_{var}   = _sym3d_{var}.dataDefinedProperties()',
-            f'    _ddp_{var}.setProperty(',
-            f'        QgsAbstract3DSymbol.PropertyExtrusionHeight,',
-            f'        QgsProperty.fromField(_HEIGHT_FIELD_{var}),',
-            f'    )',
-            f'    _sym3d_{var}.setDataDefinedProperties(_ddp_{var})',
-            f'    _rndr3d_{var} = QgsVectorLayer3DRenderer()',
-            f'    _rndr3d_{var}.setSymbol(_sym3d_{var})',
-            f'    lyr_{var}.setRenderer3D(_rndr3d_{var})',
-            f'    lyr_{var}.triggerRepaint()',
-            f'    print(f"  3D extrusion applied using \'{{_HEIGHT_FIELD_{var}}}\'")',
-            f'',
-        ]
-
-    if "z_stats" in ops:
-        lines += [
-            f'    # --- Z statistics ---',
-            f'    from qgis.core import QgsWkbTypes',
-            f'    if QgsWkbTypes.hasZ(lyr_{var}.wkbType()):',
-            f'        _zvals_{var} = []',
-            f'        for _feat in lyr_{var}.getFeatures():',
-            f'            for _v in _feat.geometry().vertices():',
-            f'                _zvals_{var}.append(_v.z())',
-            f'        if _zvals_{var}:',
-            f'            print(f"  Z min : {{min(_zvals_{var}):.3f}}")',
-            f'            print(f"  Z max : {{max(_zvals_{var}):.3f}}")',
-            f'            print(f"  Z mean: {{sum(_zvals_{var})/len(_zvals_{var}):.3f}}")',
-            f'    else:',
-            f'        print("  Layer has no Z values — load a 3D geometry source.")',
-            f'',
-        ]
-
-    if "floor_ceiling" in ops:
-        lines += [
-            f'    # --- floor / ceiling heights ---',
-            f'    # Extrudes from a base elevation to a roof elevation using two fields.',
-            f'    # TODO: set BASE_FIELD and ROOF_FIELD.',
-            f'    from qgis.core import (',
-            f'        QgsPolygon3DSymbol, QgsVectorLayer3DRenderer,',
-            f'        QgsAbstract3DSymbol, QgsProperty,',
-            f'    )',
-            f'    _BASE_FIELD_{var} = "base_height"  # TODO: change',
-            f'    _ROOF_FIELD_{var} = "roof_height"  # TODO: change',
-            f'    _sym_fc_{var} = QgsPolygon3DSymbol()',
-            f'    _ddp_fc_{var} = _sym_fc_{var}.dataDefinedProperties()',
-            f'    # Base (floor) elevation',
-            f'    _ddp_fc_{var}.setProperty(',
-            f'        QgsAbstract3DSymbol.PropertyHeight,',
-            f'        QgsProperty.fromField(_BASE_FIELD_{var}),',
-            f'    )',
-            f'    # Extrusion = roof - base',
-            f'    _ddp_fc_{var}.setProperty(',
-            f'        QgsAbstract3DSymbol.PropertyExtrusionHeight,',
-            f'        QgsProperty.fromExpression(',
-            f'            f\'"{{_ROOF_FIELD_{var}}}" - "{{_BASE_FIELD_{var}}}"\'',
-            f'        ),',
-            f'    )',
-            f'    _sym_fc_{var}.setDataDefinedProperties(_ddp_fc_{var})',
-            f'    _rndr_fc_{var} = QgsVectorLayer3DRenderer()',
-            f'    _rndr_fc_{var}.setSymbol(_sym_fc_{var})',
-            f'    lyr_{var}.setRenderer3D(_rndr_fc_{var})',
-            f'    lyr_{var}.triggerRepaint()',
-            f'    print(f"  Floor/ceiling extrusion: base=\'{{_BASE_FIELD_{var}}}\' roof=\'{{_ROOF_FIELD_{var}}}\'")',
-            f'',
-        ]
-
-    if "volume" in ops:
-        lines += [
-            f'    # --- approximate volume (footprint area × height) ---',
-            f'    # TODO: set HEIGHT_FIELD.',
-            f'    # For exact 3D volume use ST_Volume() directly in PostGIS.',
-            f'    _VOL_HEIGHT_{var} = "height"  # TODO: change',
-            f'    _total_vol_{var} = 0.0',
-            f'    for _feat in lyr_{var}.getFeatures():',
-            f'        _h = _feat[_VOL_HEIGHT_{var}]',
-            f'        if _h:',
-            f'            _total_vol_{var} += _feat.geometry().area() * float(_h)',
-            f'    print(f"  Approx. total volume: {{_total_vol_{var}:,.1f}} (CRS units³)")',
-            f'',
-        ]
-
-    if "scene_layer" in ops:
-        lines += [
-            f'    # --- export to 3D Tiles (QGIS 3.34+) ---',
-            f'    # TODO: set output directory. Requires the layer to have a 3D renderer.',
-            f'    _out_tiles_{var} = f"/tmp/{table}_3dtiles"',
-            f'    import os as _os',
-            f'    _os.makedirs(_out_tiles_{var}, exist_ok=True)',
-            f'    # processing.run("native:convert3dtiles", {{',
-            f'    #     "INPUT":           lyr_{var},',
-            f'    #     "OUTPUT_FOLDER":   _out_tiles_{var},',
-            f'    #     "COMPRESSION":     0,  # 0=None, 1=GZIP',
-            f'    # }})',
-            f'    # print(f"  3D Tiles written to: {{_out_tiles_{var}}}")',
-            f'',
-        ]
-
+    for op_name in VALID_OPERATIONS:
+        if op_name in ops and op_name in registry:
+            lines += registry[op_name](var, table, first_col)
     return lines
+
+
+# ---------------------------------------------------------------------------
+# PyQGIS operation templates
+# ---------------------------------------------------------------------------
+
+def _pq_reproject(var, table, _fc):
+    return [
+        f'    # --- reproject ---',
+        f'    # TODO: change "EPSG:4326" to your target CRS',
+        f'    _target_crs_{var} = QgsCoordinateReferenceSystem("EPSG:4326")',
+        f'    _reproj_{var} = processing.run("native:reprojectlayer", {{',
+        f'        "INPUT":      lyr_{var},',
+        f'        "TARGET_CRS": _target_crs_{var},',
+        f'        "OUTPUT":     "memory:",',
+        f'    }})',
+        f'    lyr_{var}_reprojected = _reproj_{var}["OUTPUT"]',
+        f'    print(f"  Reprojected: {{lyr_{var}_reprojected.featureCount()}} features")',
+        f'',
+    ]
+
+def _pq_export(var, table, _fc):
+    return [
+        f'    # --- export to GeoJSON ---',
+        f'    # TODO: change output path',
+        f'    from qgis.core import QgsVectorFileWriter',
+        f'    _out_{var} = f"/tmp/{table}.geojson"',
+        f'    _err_{var}, _msg_{var} = QgsVectorFileWriter.writeAsVectorFormat(',
+        f'        lyr_{var}, _out_{var}, "utf-8", lyr_{var}.crs(), "GeoJSON",',
+        f'    )',
+        f'    if _err_{var} == QgsVectorFileWriter.NoError:',
+        f'        print(f"  Exported to {{_out_{var}}}")',
+        f'    else:',
+        f'        print(f"  Export error: {{_msg_{var}}}")',
+        f'',
+    ]
+
+def _pq_buffer(var, table, _fc):
+    return [
+        f'    # --- buffer ---',
+        f'    # TODO: set DISTANCE in layer CRS units',
+        f'    _buf_{var} = processing.run("native:buffer", {{',
+        f'        "INPUT":         lyr_{var},',
+        f'        "DISTANCE":      100,',
+        f'        "SEGMENTS":      5,',
+        f'        "END_CAP_STYLE": 0,',
+        f'        "JOIN_STYLE":    0,',
+        f'        "MITER_LIMIT":   2,',
+        f'        "DISSOLVE":      False,',
+        f'        "OUTPUT":        "memory:",',
+        f'    }})',
+        f'    lyr_{var}_buffer = _buf_{var}["OUTPUT"]',
+        f'    print(f"  Buffer: {{lyr_{var}_buffer.featureCount()}} features")',
+        f'',
+    ]
+
+def _pq_clip(var, table, _fc):
+    return [
+        f'    # --- clip ---',
+        f'    # TODO: define clip_layer_{var}, then uncomment',
+        f'    # clip_layer_{var} = QgsVectorLayer("/path/to/boundary.shp", "boundary", "ogr")',
+        f'    # _clip_{var} = processing.run("native:clip", {{',
+        f'    #     "INPUT":   lyr_{var},',
+        f'    #     "OVERLAY": clip_layer_{var},',
+        f'    #     "OUTPUT":  "memory:",',
+        f'    # }})',
+        f'    # lyr_{var}_clipped = _clip_{var}["OUTPUT"]',
+        f'    # print(f"  Clipped: {{lyr_{var}_clipped.featureCount()}} features")',
+        f'',
+    ]
+
+def _pq_select(var, table, first_col):
+    expr = f'"{first_col}" IS NOT NULL'
+    return [
+        f'    # --- select by attribute ---',
+        f'    # TODO: update expression',
+        f"    lyr_{var}.selectByExpression('{expr}')",
+        f'    print(f"  Selected: {{lyr_{var}.selectedFeatureCount()}} features")',
+        f'    lyr_{var}.removeSelection()',
+        f'',
+    ]
+
+def _pq_dissolve(var, table, _fc):
+    return [
+        f'    # --- dissolve ---',
+        f'    # TODO: set FIELD list (empty = dissolve all into one feature)',
+        f'    _diss_{var} = processing.run("native:dissolve", {{',
+        f'        "INPUT":  lyr_{var},',
+        f'        "FIELD":  [],  # e.g. ["district_name"]',
+        f'        "OUTPUT": "memory:",',
+        f'    }})',
+        f'    lyr_{var}_dissolved = _diss_{var}["OUTPUT"]',
+        f'    print(f"  Dissolved: {{lyr_{var}_dissolved.featureCount()}} features")',
+        f'',
+    ]
+
+def _pq_centroid(var, table, _fc):
+    return [
+        f'    # --- centroid ---',
+        f'    _cent_{var} = processing.run("native:centroids", {{',
+        f'        "INPUT":     lyr_{var},',
+        f'        "ALL_PARTS": False,',
+        f'        "OUTPUT":    "memory:",',
+        f'    }})',
+        f'    lyr_{var}_centroids = _cent_{var}["OUTPUT"]',
+        f'    print(f"  Centroids: {{lyr_{var}_centroids.featureCount()}} points")',
+        f'',
+    ]
+
+def _pq_field_calc(var, table, _fc):
+    return [
+        f'    # --- field calculator ---',
+        f'    # TODO: set FIELD_NAME and FORMULA (uses QGIS expression syntax)',
+        f'    _calc_{var} = processing.run("native:fieldcalculator", {{',
+        f'        "INPUT":           lyr_{var},',
+        f'        "FIELD_NAME":      "new_field",  # TODO: change',
+        f'        "FIELD_TYPE":      0,            # 0=float, 1=int, 2=string',
+        f'        "FIELD_LENGTH":    20,',
+        f'        "FIELD_PRECISION": 3,',
+        f'        "FORMULA":         "$area",      # TODO: change expression',
+        f'        "OUTPUT":          "memory:",',
+        f'    }})',
+        f'    lyr_{var}_calculated = _calc_{var}["OUTPUT"]',
+        f'    print(f"  Field calculated: {{lyr_{var}_calculated.featureCount()}} features")',
+        f'',
+    ]
+
+def _pq_spatial_join(var, table, _fc):
+    return [
+        f'    # --- spatial join ---',
+        f'    # TODO: define join_layer_{var}, then uncomment',
+        f'    # join_layer_{var} = QgsVectorLayer("/path/to/join.shp", "join", "ogr")',
+        f'    # _sjoin_{var} = processing.run("native:joinattributesbylocation", {{',
+        f'    #     "INPUT":              lyr_{var},',
+        f'    #     "JOIN":               join_layer_{var},',
+        f'    #     "PREDICATE":          [0],  # 0=intersects, 1=contains, 2=equals',
+        f'    #     "JOIN_FIELDS":        [],   # empty = all fields',
+        f'    #     "METHOD":             1,    # 1=first match, 2=largest overlap',
+        f'    #     "DISCARD_NONMATCHING": False,',
+        f'    #     "OUTPUT":             "memory:",',
+        f'    # }})',
+        f'    # lyr_{var}_joined = _sjoin_{var}["OUTPUT"]',
+        f'    # print(f"  Spatial join: {{lyr_{var}_joined.featureCount()}} features")',
+        f'',
+    ]
+
+def _pq_intersect(var, table, _fc):
+    return [
+        f'    # --- intersect ---',
+        f'    # TODO: define overlay_layer_{var}, then uncomment',
+        f'    # overlay_layer_{var} = QgsVectorLayer("/path/to/overlay.shp", "overlay", "ogr")',
+        f'    # _isect_{var} = processing.run("native:intersection", {{',
+        f'    #     "INPUT":          lyr_{var},',
+        f'    #     "OVERLAY":        overlay_layer_{var},',
+        f'    #     "INPUT_FIELDS":   [],',
+        f'    #     "OVERLAY_FIELDS": [],',
+        f'    #     "OUTPUT":         "memory:",',
+        f'    # }})',
+        f'    # lyr_{var}_intersected = _isect_{var}["OUTPUT"]',
+        f'    # print(f"  Intersect: {{lyr_{var}_intersected.featureCount()}} features")',
+        f'',
+    ]
+
+def _pq_extrude(var, table, _fc):
+    return [
+        f'    # --- 3D extrude ---',
+        f'    # Applies a data-defined extrusion renderer to the layer.',
+        f'    # TODO: set HEIGHT_FIELD to your building height attribute.',
+        f'    from qgis.core import (',
+        f'        QgsPolygon3DSymbol, QgsVectorLayer3DRenderer,',
+        f'        QgsAbstract3DSymbol, QgsProperty,',
+        f'    )',
+        f'    _HEIGHT_FIELD_{var} = "height"  # TODO: change',
+        f'    _sym3d_{var} = QgsPolygon3DSymbol()',
+        f'    _ddp_{var}   = _sym3d_{var}.dataDefinedProperties()',
+        f'    _ddp_{var}.setProperty(',
+        f'        QgsAbstract3DSymbol.PropertyExtrusionHeight,',
+        f'        QgsProperty.fromField(_HEIGHT_FIELD_{var}),',
+        f'    )',
+        f'    _sym3d_{var}.setDataDefinedProperties(_ddp_{var})',
+        f'    _rndr3d_{var} = QgsVectorLayer3DRenderer()',
+        f'    _rndr3d_{var}.setSymbol(_sym3d_{var})',
+        f'    lyr_{var}.setRenderer3D(_rndr3d_{var})',
+        f'    lyr_{var}.triggerRepaint()',
+        f'    print(f"  3D extrusion applied using \'{{_HEIGHT_FIELD_{var}}}\'")',
+        f'',
+    ]
+
+def _pq_z_stats(var, table, _fc):
+    return [
+        f'    # --- Z statistics ---',
+        f'    from qgis.core import QgsWkbTypes',
+        f'    if QgsWkbTypes.hasZ(lyr_{var}.wkbType()):',
+        f'        _zvals_{var} = []',
+        f'        for _feat in lyr_{var}.getFeatures():',
+        f'            for _v in _feat.geometry().vertices():',
+        f'                _zvals_{var}.append(_v.z())',
+        f'        if _zvals_{var}:',
+        f'            print(f"  Z min : {{min(_zvals_{var}):.3f}}")',
+        f'            print(f"  Z max : {{max(_zvals_{var}):.3f}}")',
+        f'            print(f"  Z mean: {{sum(_zvals_{var})/len(_zvals_{var}):.3f}}")',
+        f'    else:',
+        f'        print("  Layer has no Z values — load a 3D geometry source.")',
+        f'',
+    ]
+
+def _pq_floor_ceiling(var, table, _fc):
+    return [
+        f'    # --- floor / ceiling heights ---',
+        f'    # Extrudes from a base elevation to a roof elevation using two fields.',
+        f'    # TODO: set BASE_FIELD and ROOF_FIELD.',
+        f'    from qgis.core import (',
+        f'        QgsPolygon3DSymbol, QgsVectorLayer3DRenderer,',
+        f'        QgsAbstract3DSymbol, QgsProperty,',
+        f'    )',
+        f'    _BASE_FIELD_{var} = "base_height"  # TODO: change',
+        f'    _ROOF_FIELD_{var} = "roof_height"  # TODO: change',
+        f'    _sym_fc_{var} = QgsPolygon3DSymbol()',
+        f'    _ddp_fc_{var} = _sym_fc_{var}.dataDefinedProperties()',
+        f'    # Base (floor) elevation',
+        f'    _ddp_fc_{var}.setProperty(',
+        f'        QgsAbstract3DSymbol.PropertyHeight,',
+        f'        QgsProperty.fromField(_BASE_FIELD_{var}),',
+        f'    )',
+        f'    # Extrusion = roof - base',
+        f'    _ddp_fc_{var}.setProperty(',
+        f'        QgsAbstract3DSymbol.PropertyExtrusionHeight,',
+        f'        QgsProperty.fromExpression(',
+        f'            f\'"{{_ROOF_FIELD_{var}}}" - "{{_BASE_FIELD_{var}}}"\'',
+        f'        ),',
+        f'    )',
+        f'    _sym_fc_{var}.setDataDefinedProperties(_ddp_fc_{var})',
+        f'    _rndr_fc_{var} = QgsVectorLayer3DRenderer()',
+        f'    _rndr_fc_{var}.setSymbol(_sym_fc_{var})',
+        f'    lyr_{var}.setRenderer3D(_rndr_fc_{var})',
+        f'    lyr_{var}.triggerRepaint()',
+        f'    print(f"  Floor/ceiling extrusion: base=\'{{_BASE_FIELD_{var}}}\' roof=\'{{_ROOF_FIELD_{var}}}\'")',
+        f'',
+    ]
+
+def _pq_volume(var, table, _fc):
+    return [
+        f'    # --- approximate volume (footprint area × height) ---',
+        f'    # TODO: set HEIGHT_FIELD.',
+        f'    # For exact 3D volume use ST_Volume() directly in PostGIS.',
+        f'    _VOL_HEIGHT_{var} = "height"  # TODO: change',
+        f'    _total_vol_{var} = 0.0',
+        f'    for _feat in lyr_{var}.getFeatures():',
+        f'        _h = _feat[_VOL_HEIGHT_{var}]',
+        f'        if _h:',
+        f'            _total_vol_{var} += _feat.geometry().area() * float(_h)',
+        f'    print(f"  Approx. total volume: {{_total_vol_{var}:,.1f}} (CRS units³)")',
+        f'',
+    ]
+
+def _pq_scene_layer(var, table, _fc):
+    return [
+        f'    # --- export to 3D Tiles (QGIS 3.34+) ---',
+        f'    # TODO: set output directory. Requires the layer to have a 3D renderer.',
+        f'    _out_tiles_{var} = f"/tmp/{table}_3dtiles"',
+        f'    import os as _os',
+        f'    _os.makedirs(_out_tiles_{var}, exist_ok=True)',
+        f'    # processing.run("native:convert3dtiles", {{',
+        f'    #     "INPUT":           lyr_{var},',
+        f'    #     "OUTPUT_FOLDER":   _out_tiles_{var},',
+        f'    #     "COMPRESSION":     0,  # 0=None, 1=GZIP',
+        f'    # }})',
+        f'    # print(f"  3D Tiles written to: {{_out_tiles_{var}}}")',
+        f'',
+    ]
+
+_PYQGIS_OPS = {
+    "reproject": _pq_reproject, "export": _pq_export, "buffer": _pq_buffer,
+    "clip": _pq_clip, "select": _pq_select, "dissolve": _pq_dissolve,
+    "centroid": _pq_centroid, "field_calc": _pq_field_calc,
+    "spatial_join": _pq_spatial_join, "intersect": _pq_intersect,
+    "extrude": _pq_extrude, "z_stats": _pq_z_stats,
+    "floor_ceiling": _pq_floor_ceiling, "volume": _pq_volume,
+    "scene_layer": _pq_scene_layer,
+}
+
+
+# ---------------------------------------------------------------------------
+# ArcPy operation templates
+# ---------------------------------------------------------------------------
+
+def _ap_reproject(var, table, _fc):
+    return [
+        f'    # --- reproject ---',
+        f'    # TODO: set output path and target WKID',
+        f'    _out_reproj_{var} = os.path.join(tempfile.gettempdir(), "{table}_reproj.shp")',
+        f'    arcpy.management.Project(',
+        f'        fc_{var},',
+        f'        _out_reproj_{var},',
+        f'        arcpy.SpatialReference(4326),  # TODO: change WKID',
+        f'    )',
+        f'    print(f"  Reprojected to: {{_out_reproj_{var}}}")',
+        f'',
+    ]
+
+def _ap_export(var, table, _fc):
+    return [
+        f'    # --- export ---',
+        f'    # TODO: set output directory',
+        f'    _out_dir_{var} = tempfile.gettempdir()',
+        f'    arcpy.conversion.FeatureClassToShapefile(fc_{var}, _out_dir_{var})',
+        f'    print(f"  Exported shapefile to: {{_out_dir_{var}}}")',
+        f'    # To export as GeoJSON:',
+        f'    # arcpy.conversion.FeaturesToJSON(',
+        f'    #     fc_{var},',
+        f'    #     os.path.join(_out_dir_{var}, "{table}.geojson"),',
+        f'    #     geoJSON="GEOJSON",',
+        f'    # )',
+        f'',
+    ]
+
+def _ap_buffer(var, table, _fc):
+    return [
+        f'    # --- buffer ---',
+        f'    # TODO: set output path and distance',
+        f'    _out_buf_{var} = os.path.join(tempfile.gettempdir(), "{table}_buffer.shp")',
+        f'    arcpy.analysis.Buffer(',
+        f'        fc_{var},',
+        f'        _out_buf_{var},',
+        f'        "100 Meters",  # TODO: change distance and units',
+        f'        "FULL", "ROUND", "NONE",',
+        f'    )',
+        f'    print(f"  Buffer saved to: {{_out_buf_{var}}}")',
+        f'',
+    ]
+
+def _ap_clip(var, table, _fc):
+    return [
+        f'    # --- clip ---',
+        f'    # TODO: set clip boundary path, then uncomment',
+        f'    # _clip_fc_{var}  = r"C:\\path\\to\\boundary.shp"',
+        f'    # _out_clip_{var} = os.path.join(tempfile.gettempdir(), "{table}_clipped.shp")',
+        f'    # arcpy.analysis.Clip(fc_{var}, _clip_fc_{var}, _out_clip_{var})',
+        f'    # print(f"  Clipped to: {{_out_clip_{var}}}")',
+        f'',
+    ]
+
+def _ap_select(var, table, first_col):
+    where = f"{first_col} IS NOT NULL"
+    return [
+        f'    # --- select by attribute ---',
+        f'    # TODO: update where_clause',
+        f'    _lyr_sel_{var} = arcpy.management.MakeFeatureLayer(fc_{var}, "{table}_sel")[0]',
+        f'    arcpy.management.SelectLayerByAttribute(',
+        f'        _lyr_sel_{var}, "NEW_SELECTION", "{where}",',
+        f'    )',
+        f'    _sel_count_{var} = int(arcpy.management.GetCount(_lyr_sel_{var})[0])',
+        f'    print(f"  Selected: {{_sel_count_{var}}} features")',
+        f'    arcpy.management.Delete(_lyr_sel_{var})',
+        f'',
+    ]
+
+def _ap_dissolve(var, table, _fc):
+    return [
+        f'    # --- dissolve ---',
+        f'    # TODO: set dissolve_field (None = dissolve all into one feature)',
+        f'    _out_diss_{var} = os.path.join(tempfile.gettempdir(), "{table}_dissolved.shp")',
+        f'    arcpy.management.Dissolve(',
+        f'        fc_{var},',
+        f'        _out_diss_{var},',
+        f'        dissolve_field=None,  # e.g. "district_name"',
+        f'        multi_part="MULTI_PART",',
+        f'    )',
+        f'    print(f"  Dissolved to: {{_out_diss_{var}}}")',
+        f'',
+    ]
+
+def _ap_centroid(var, table, _fc):
+    return [
+        f'    # --- centroid ---',
+        f'    _out_cent_{var} = os.path.join(tempfile.gettempdir(), "{table}_centroids.shp")',
+        f'    arcpy.management.FeatureToPoint(',
+        f'        fc_{var}, _out_cent_{var}, point_location="CENTROID",',
+        f'    )',
+        f'    print(f"  Centroids saved to: {{_out_cent_{var}}}")',
+        f'',
+    ]
+
+def _ap_field_calc(var, table, _fc):
+    return [
+        f'    # --- field calculator ---',
+        f'    # Copies to temp first to avoid modifying the source DB',
+        f'    # TODO: set field name, type, and expression',
+        f'    _out_calc_{var} = os.path.join(tempfile.gettempdir(), "{table}_calc.shp")',
+        f'    arcpy.management.CopyFeatures(fc_{var}, _out_calc_{var})',
+        f'    arcpy.management.AddField(_out_calc_{var}, "new_field", "DOUBLE")',
+        f'    arcpy.management.CalculateField(',
+        f'        _out_calc_{var},',
+        f'        "new_field",',
+        f'        "!Shape_Area!",  # TODO: change expression',
+        f'        "PYTHON3",',
+        f'    )',
+        f'    print(f"  Field calculated, saved to: {{_out_calc_{var}}}")',
+        f'',
+    ]
+
+def _ap_spatial_join(var, table, _fc):
+    return [
+        f'    # --- spatial join ---',
+        f'    # TODO: set _join_fc_{var} path, then uncomment',
+        f'    # _join_fc_{var}   = r"C:\\path\\to\\join_layer.shp"',
+        f'    # _out_sjoin_{var} = os.path.join(tempfile.gettempdir(), "{table}_sjoin.shp")',
+        f'    # arcpy.analysis.SpatialJoin(',
+        f'    #     target_features=fc_{var},',
+        f'    #     join_features=_join_fc_{var},',
+        f'    #     out_feature_class=_out_sjoin_{var},',
+        f'    #     join_operation="JOIN_ONE_TO_ONE",',
+        f'    #     join_type="KEEP_ALL",',
+        f'    #     match_option="INTERSECT",',
+        f'    # )',
+        f'    # print(f"  Spatial join saved to: {{_out_sjoin_{var}}}")',
+        f'',
+    ]
+
+def _ap_intersect(var, table, _fc):
+    return [
+        f'    # --- intersect ---',
+        f'    # TODO: set _overlay_fc_{var} path, then uncomment',
+        f'    # _overlay_fc_{var} = r"C:\\path\\to\\overlay.shp"',
+        f'    # _out_isect_{var}  = os.path.join(tempfile.gettempdir(), "{table}_intersect.shp")',
+        f'    # arcpy.analysis.Intersect(',
+        f'    #     in_features=[fc_{var}, _overlay_fc_{var}],',
+        f'    #     out_feature_class=_out_isect_{var},',
+        f'    # )',
+        f'    # print(f"  Intersect saved to: {{_out_isect_{var}}}")',
+        f'',
+    ]
+
+def _ap_extrude(var, table, _fc):
+    return [
+        f'    # --- 3D extrude (multipatch) ---',
+        f'    # Requires 3D Analyst extension.',
+        f'    # TODO: set HEIGHT_FIELD to your building height attribute.',
+        f'    import arcpy.ddd',
+        f'    _HEIGHT_FIELD_{var} = "height"  # TODO: change',
+        f'    _out_mp_{var} = os.path.join(tempfile.gettempdir(), "{table}_multipatch.gdb", "{table}_mp")',
+        f'    arcpy.management.CreateFileGDB(tempfile.gettempdir(), "{table}_multipatch.gdb")',
+        f'    arcpy.ddd.ExtrudePolygon(',
+        f'        in_features=fc_{var},',
+        f'        out_feature_class=_out_mp_{var},',
+        f'        size=_HEIGHT_FIELD_{var},',
+        f'    )',
+        f'    print(f"  Multipatch saved to: {{_out_mp_{var}}}")',
+        f'',
+    ]
+
+def _ap_z_stats(var, table, _fc):
+    return [
+        f'    # --- Z statistics ---',
+        f'    # Requires 3D Analyst extension. Adds Z fields to a temp copy.',
+        f'    import arcpy.ddd',
+        f'    _out_z_{var} = os.path.join(tempfile.gettempdir(), "{table}_zstats.shp")',
+        f'    arcpy.management.CopyFeatures(fc_{var}, _out_z_{var})',
+        f'    arcpy.ddd.AddZInformation(_out_z_{var}, "Z_MIN;Z_MAX;Z_MEAN", "NO_FILTER")',
+        f'    with arcpy.da.SearchCursor(_out_z_{var}, ["Z_MIN", "Z_MAX", "Z_MEAN"]) as _cur_z:',
+        f'        for _i, _row in enumerate(_cur_z):',
+        f'            if _i >= 5: break',
+        f'            print(f"  Z_MIN={{_row[0]:.2f}}  Z_MAX={{_row[1]:.2f}}  Z_MEAN={{_row[2]:.2f}}")',
+        f'',
+    ]
+
+def _ap_floor_ceiling(var, table, _fc):
+    return [
+        f'    # --- floor / ceiling heights ---',
+        f'    # Extrudes from a base elevation field to a roof elevation field.',
+        f'    # Requires 3D Analyst extension.',
+        f'    # TODO: set BASE_FIELD and ROOF_FIELD.',
+        f'    import arcpy.ddd',
+        f'    _BASE_FIELD_{var} = "base_height"  # TODO: change',
+        f'    _ROOF_FIELD_{var} = "roof_height"  # TODO: change',
+        f'    _out_fc_{var} = os.path.join(tempfile.gettempdir(), "{table}_massing.gdb", "{table}_mp")',
+        f'    arcpy.management.CreateFileGDB(tempfile.gettempdir(), "{table}_massing.gdb")',
+        f'    arcpy.ddd.ExtrudePolygon(',
+        f'        in_features=fc_{var},',
+        f'        out_feature_class=_out_fc_{var},',
+        f'        size=_ROOF_FIELD_{var},',
+        f'        base_elevation_field=_BASE_FIELD_{var},',
+        f'    )',
+        f'    print(f"  Massing saved to: {{_out_fc_{var}}}")',
+        f'',
+    ]
+
+def _ap_volume(var, table, _fc):
+    return [
+        f'    # --- approximate volume (footprint area × height) ---',
+        f'    # For exact multipatch volume use arcpy.ddd.SurfaceVolume().',
+        f'    # TODO: set HEIGHT_FIELD.',
+        f'    _VOL_HEIGHT_{var} = "height"  # TODO: change',
+        f'    _total_vol_{var} = 0.0',
+        f'    with arcpy.da.SearchCursor(',
+        f'        fc_{var}, [_VOL_HEIGHT_{var}, "SHAPE@AREA"]',
+        f'    ) as _cur_vol:',
+        f'        for _row in _cur_vol:',
+        f'            if _row[0] and _row[1]:',
+        f'                _total_vol_{var} += _row[0] * _row[1]',
+        f'    print(f"  Approx. total volume: {{_total_vol_{var}:,.1f}} (CRS units³)")',
+        f'    # For multipatch volume: arcpy.ddd.SurfaceVolume(multipatch_fc, ...)',
+        f'',
+    ]
+
+def _ap_scene_layer(var, table, _fc):
+    return [
+        f'    # --- export to Scene Layer Package (.slpk) ---',
+        f'    # TODO: set output path.',
+        f'    _out_slpk_{var} = os.path.join(tempfile.gettempdir(), "{table}.slpk")',
+        f'    arcpy.management.CreateSceneLayerPackage(',
+        f'        in_dataset=fc_{var},',
+        f'        output_slpk=_out_slpk_{var},',
+        f'    )',
+        f'    print(f"  Scene Layer Package: {{_out_slpk_{var}}}")',
+        f'',
+    ]
+
+_ARCPY_OPS = {
+    "reproject": _ap_reproject, "export": _ap_export, "buffer": _ap_buffer,
+    "clip": _ap_clip, "select": _ap_select, "dissolve": _ap_dissolve,
+    "centroid": _ap_centroid, "field_calc": _ap_field_calc,
+    "spatial_join": _ap_spatial_join, "intersect": _ap_intersect,
+    "extrude": _ap_extrude, "z_stats": _ap_z_stats,
+    "floor_ceiling": _ap_floor_ceiling, "volume": _ap_volume,
+    "scene_layer": _ap_scene_layer,
+}
+
+
+def _pyqgis_op_blocks(var: str, table: str, columns: list[dict], ops: set[str]) -> list[str]:
+    """Return 4-space-indented lines for each requested PyQGIS operation."""
+    return _op_blocks(var, table, columns, ops, _PYQGIS_OPS)
 
 
 def _arcpy_op_blocks(var: str, table: str, columns: list[dict], ops: set[str]) -> list[str]:
     """Return 4-space-indented lines for each requested ArcPy operation."""
-    lines = []
-    first_col = columns[0]["name"] if columns else "field_name"
-
-    if "reproject" in ops:
-        lines += [
-            f'    # --- reproject ---',
-            f'    # TODO: set output path and target WKID',
-            f'    _out_reproj_{var} = os.path.join(tempfile.gettempdir(), "{table}_reproj.shp")',
-            f'    arcpy.management.Project(',
-            f'        fc_{var},',
-            f'        _out_reproj_{var},',
-            f'        arcpy.SpatialReference(4326),  # TODO: change WKID',
-            f'    )',
-            f'    print(f"  Reprojected to: {{_out_reproj_{var}}}")',
-            f'',
-        ]
-
-    if "export" in ops:
-        lines += [
-            f'    # --- export ---',
-            f'    # TODO: set output directory',
-            f'    _out_dir_{var} = tempfile.gettempdir()',
-            f'    arcpy.conversion.FeatureClassToShapefile(fc_{var}, _out_dir_{var})',
-            f'    print(f"  Exported shapefile to: {{_out_dir_{var}}}")',
-            f'    # To export as GeoJSON:',
-            f'    # arcpy.conversion.FeaturesToJSON(',
-            f'    #     fc_{var},',
-            f'    #     os.path.join(_out_dir_{var}, "{table}.geojson"),',
-            f'    #     geoJSON="GEOJSON",',
-            f'    # )',
-            f'',
-        ]
-
-    if "buffer" in ops:
-        lines += [
-            f'    # --- buffer ---',
-            f'    # TODO: set output path and distance',
-            f'    _out_buf_{var} = os.path.join(tempfile.gettempdir(), "{table}_buffer.shp")',
-            f'    arcpy.analysis.Buffer(',
-            f'        fc_{var},',
-            f'        _out_buf_{var},',
-            f'        "100 Meters",  # TODO: change distance and units',
-            f'        "FULL", "ROUND", "NONE",',
-            f'    )',
-            f'    print(f"  Buffer saved to: {{_out_buf_{var}}}")',
-            f'',
-        ]
-
-    if "clip" in ops:
-        lines += [
-            f'    # --- clip ---',
-            f'    # TODO: set clip boundary path, then uncomment',
-            f'    # _clip_fc_{var}  = r"C:\\path\\to\\boundary.shp"',
-            f'    # _out_clip_{var} = os.path.join(tempfile.gettempdir(), "{table}_clipped.shp")',
-            f'    # arcpy.analysis.Clip(fc_{var}, _clip_fc_{var}, _out_clip_{var})',
-            f'    # print(f"  Clipped to: {{_out_clip_{var}}}")',
-            f'',
-        ]
-
-    if "select" in ops:
-        where = f"{first_col} IS NOT NULL"
-        lines += [
-            f'    # --- select by attribute ---',
-            f'    # TODO: update where_clause',
-            f'    _lyr_sel_{var} = arcpy.management.MakeFeatureLayer(fc_{var}, "{table}_sel")[0]',
-            f'    arcpy.management.SelectLayerByAttribute(',
-            f'        _lyr_sel_{var}, "NEW_SELECTION", "{where}",',
-            f'    )',
-            f'    _sel_count_{var} = int(arcpy.management.GetCount(_lyr_sel_{var})[0])',
-            f'    print(f"  Selected: {{_sel_count_{var}}} features")',
-            f'    arcpy.management.Delete(_lyr_sel_{var})',
-            f'',
-        ]
-
-    if "dissolve" in ops:
-        lines += [
-            f'    # --- dissolve ---',
-            f'    # TODO: set dissolve_field (None = dissolve all into one feature)',
-            f'    _out_diss_{var} = os.path.join(tempfile.gettempdir(), "{table}_dissolved.shp")',
-            f'    arcpy.management.Dissolve(',
-            f'        fc_{var},',
-            f'        _out_diss_{var},',
-            f'        dissolve_field=None,  # e.g. "district_name"',
-            f'        multi_part="MULTI_PART",',
-            f'    )',
-            f'    print(f"  Dissolved to: {{_out_diss_{var}}}")',
-            f'',
-        ]
-
-    if "centroid" in ops:
-        lines += [
-            f'    # --- centroid ---',
-            f'    _out_cent_{var} = os.path.join(tempfile.gettempdir(), "{table}_centroids.shp")',
-            f'    arcpy.management.FeatureToPoint(',
-            f'        fc_{var}, _out_cent_{var}, point_location="CENTROID",',
-            f'    )',
-            f'    print(f"  Centroids saved to: {{_out_cent_{var}}}")',
-            f'',
-        ]
-
-    if "field_calc" in ops:
-        lines += [
-            f'    # --- field calculator ---',
-            f'    # Copies to temp first to avoid modifying the source DB',
-            f'    # TODO: set field name, type, and expression',
-            f'    _out_calc_{var} = os.path.join(tempfile.gettempdir(), "{table}_calc.shp")',
-            f'    arcpy.management.CopyFeatures(fc_{var}, _out_calc_{var})',
-            f'    arcpy.management.AddField(_out_calc_{var}, "new_field", "DOUBLE")',
-            f'    arcpy.management.CalculateField(',
-            f'        _out_calc_{var},',
-            f'        "new_field",',
-            f'        "!Shape_Area!",  # TODO: change expression',
-            f'        "PYTHON3",',
-            f'    )',
-            f'    print(f"  Field calculated, saved to: {{_out_calc_{var}}}")',
-            f'',
-        ]
-
-    if "spatial_join" in ops:
-        lines += [
-            f'    # --- spatial join ---',
-            f'    # TODO: set _join_fc_{var} path, then uncomment',
-            f'    # _join_fc_{var}   = r"C:\\path\\to\\join_layer.shp"',
-            f'    # _out_sjoin_{var} = os.path.join(tempfile.gettempdir(), "{table}_sjoin.shp")',
-            f'    # arcpy.analysis.SpatialJoin(',
-            f'    #     target_features=fc_{var},',
-            f'    #     join_features=_join_fc_{var},',
-            f'    #     out_feature_class=_out_sjoin_{var},',
-            f'    #     join_operation="JOIN_ONE_TO_ONE",',
-            f'    #     join_type="KEEP_ALL",',
-            f'    #     match_option="INTERSECT",',
-            f'    # )',
-            f'    # print(f"  Spatial join saved to: {{_out_sjoin_{var}}}")',
-            f'',
-        ]
-
-    if "intersect" in ops:
-        lines += [
-            f'    # --- intersect ---',
-            f'    # TODO: set _overlay_fc_{var} path, then uncomment',
-            f'    # _overlay_fc_{var} = r"C:\\path\\to\\overlay.shp"',
-            f'    # _out_isect_{var}  = os.path.join(tempfile.gettempdir(), "{table}_intersect.shp")',
-            f'    # arcpy.analysis.Intersect(',
-            f'    #     in_features=[fc_{var}, _overlay_fc_{var}],',
-            f'    #     out_feature_class=_out_isect_{var},',
-            f'    # )',
-            f'    # print(f"  Intersect saved to: {{_out_isect_{var}}}")',
-            f'',
-        ]
-
-    # ------------------------------------------------------------------
-    # 3D massing operations
-    # ------------------------------------------------------------------
-
-    if "extrude" in ops:
-        lines += [
-            f'    # --- 3D extrude (multipatch) ---',
-            f'    # Requires 3D Analyst extension.',
-            f'    # TODO: set HEIGHT_FIELD to your building height attribute.',
-            f'    import arcpy.ddd',
-            f'    _HEIGHT_FIELD_{var} = "height"  # TODO: change',
-            f'    _out_mp_{var} = os.path.join(tempfile.gettempdir(), "{table}_multipatch.gdb", "{table}_mp")',
-            f'    arcpy.management.CreateFileGDB(tempfile.gettempdir(), "{table}_multipatch.gdb")',
-            f'    arcpy.ddd.ExtrudePolygon(',
-            f'        in_features=fc_{var},',
-            f'        out_feature_class=_out_mp_{var},',
-            f'        size=_HEIGHT_FIELD_{var},',
-            f'    )',
-            f'    print(f"  Multipatch saved to: {{_out_mp_{var}}}")',
-            f'',
-        ]
-
-    if "z_stats" in ops:
-        lines += [
-            f'    # --- Z statistics ---',
-            f'    # Requires 3D Analyst extension. Adds Z fields to a temp copy.',
-            f'    import arcpy.ddd',
-            f'    _out_z_{var} = os.path.join(tempfile.gettempdir(), "{table}_zstats.shp")',
-            f'    arcpy.management.CopyFeatures(fc_{var}, _out_z_{var})',
-            f'    arcpy.ddd.AddZInformation(_out_z_{var}, "Z_MIN;Z_MAX;Z_MEAN", "NO_FILTER")',
-            f'    with arcpy.da.SearchCursor(_out_z_{var}, ["Z_MIN", "Z_MAX", "Z_MEAN"]) as _cur_z:',
-            f'        for _i, _row in enumerate(_cur_z):',
-            f'            if _i >= 5: break',
-            f'            print(f"  Z_MIN={{_row[0]:.2f}}  Z_MAX={{_row[1]:.2f}}  Z_MEAN={{_row[2]:.2f}}")',
-            f'',
-        ]
-
-    if "floor_ceiling" in ops:
-        lines += [
-            f'    # --- floor / ceiling heights ---',
-            f'    # Extrudes from a base elevation field to a roof elevation field.',
-            f'    # Requires 3D Analyst extension.',
-            f'    # TODO: set BASE_FIELD and ROOF_FIELD.',
-            f'    import arcpy.ddd',
-            f'    _BASE_FIELD_{var} = "base_height"  # TODO: change',
-            f'    _ROOF_FIELD_{var} = "roof_height"  # TODO: change',
-            f'    _out_fc_{var} = os.path.join(tempfile.gettempdir(), "{table}_massing.gdb", "{table}_mp")',
-            f'    arcpy.management.CreateFileGDB(tempfile.gettempdir(), "{table}_massing.gdb")',
-            f'    arcpy.ddd.ExtrudePolygon(',
-            f'        in_features=fc_{var},',
-            f'        out_feature_class=_out_fc_{var},',
-            f'        size=_ROOF_FIELD_{var},',
-            f'        base_elevation_field=_BASE_FIELD_{var},',
-            f'    )',
-            f'    print(f"  Massing saved to: {{_out_fc_{var}}}")',
-            f'',
-        ]
-
-    if "volume" in ops:
-        lines += [
-            f'    # --- approximate volume (footprint area × height) ---',
-            f'    # For exact multipatch volume use arcpy.ddd.SurfaceVolume().',
-            f'    # TODO: set HEIGHT_FIELD.',
-            f'    _VOL_HEIGHT_{var} = "height"  # TODO: change',
-            f'    _total_vol_{var} = 0.0',
-            f'    with arcpy.da.SearchCursor(',
-            f'        fc_{var}, [_VOL_HEIGHT_{var}, "SHAPE@AREA"]',
-            f'    ) as _cur_vol:',
-            f'        for _row in _cur_vol:',
-            f'            if _row[0] and _row[1]:',
-            f'                _total_vol_{var} += _row[0] * _row[1]',
-            f'    print(f"  Approx. total volume: {{_total_vol_{var}:,.1f}} (CRS units³)")',
-            f'    # For multipatch volume: arcpy.ddd.SurfaceVolume(multipatch_fc, ...)',
-            f'',
-        ]
-
-    if "scene_layer" in ops:
-        lines += [
-            f'    # --- export to Scene Layer Package (.slpk) ---',
-            f'    # TODO: set output path.',
-            f'    _out_slpk_{var} = os.path.join(tempfile.gettempdir(), "{table}.slpk")',
-            f'    arcpy.management.CreateSceneLayerPackage(',
-            f'        in_dataset=fc_{var},',
-            f'        output_slpk=_out_slpk_{var},',
-            f'    )',
-            f'    print(f"  Scene Layer Package: {{_out_slpk_{var}}}")',
-            f'',
-        ]
-
-    return lines
+    return _op_blocks(var, table, columns, ops, _ARCPY_OPS)
 
 
 # ---------------------------------------------------------------------------
@@ -622,7 +648,6 @@ def generate_pyqgis(
     port     = db_config["port"]
     dbname   = db_config["dbname"]
     user     = db_config["user"]
-    password = db_config["password"]
 
     layers = schema["layers"]
     ops    = set(operations or [])
@@ -844,7 +869,6 @@ def generate_arcpy(
     port     = db_config["port"]
     dbname   = db_config["dbname"]
     user     = db_config["user"]
-    password = db_config["password"]
 
     layers = schema["layers"]
     ops    = set(operations or [])
@@ -1072,7 +1096,7 @@ def _db_url_line(host: str, port: int, dbname: str, user: str, password: str) ->
 
 def generate_folium(schema: dict, db_config: dict) -> str:
     host, port = db_config["host"], db_config["port"]
-    dbname, user, password = db_config["dbname"], db_config["user"], db_config["password"]
+    dbname, user = db_config["dbname"], db_config["user"]
     layers = schema["layers"]
 
     lines = [
@@ -1161,18 +1185,6 @@ def generate_folium(schema: dict, db_config: dict) -> str:
             style = (f'{{"fillColor": "{hex_color}", "color": "#333333", '
                      f'"weight": 1, "fillOpacity": 0.5}}')
 
-        tooltip_block = ""
-        if tooltip_fields:
-            fields_str   = str(tooltip_fields)
-            aliases_str  = str(tooltip_aliases)
-            tooltip_block = (
-                f'    tooltip=folium.GeoJsonTooltip(\n'
-                f'        fields={fields_str},\n'
-                f'        aliases={aliases_str},\n'
-                f'        sticky=True,\n'
-                f'    ),'
-            )
-
         lines += [
             f'folium.GeoJson(',
             f'    gdf_{var}.__geo_interface__,',
@@ -1203,7 +1215,7 @@ def generate_folium(schema: dict, db_config: dict) -> str:
 
 def generate_kepler(schema: dict, db_config: dict) -> str:
     host, port = db_config["host"], db_config["port"]
-    dbname, user, password = db_config["dbname"], db_config["user"], db_config["password"]
+    dbname, user = db_config["dbname"], db_config["user"]
     layers = schema["layers"]
 
     lines = [
@@ -1280,7 +1292,7 @@ def generate_kepler(schema: dict, db_config: dict) -> str:
 
 def generate_deck(schema: dict, db_config: dict) -> str:
     host, port = db_config["host"], db_config["port"]
-    dbname, user, password = db_config["dbname"], db_config["user"], db_config["password"]
+    dbname, user = db_config["dbname"], db_config["user"]
     layers = schema["layers"]
 
     lines = [
@@ -1529,7 +1541,9 @@ def generate_qgs(schema: dict, db_config: dict) -> str:
     host   = db_config["host"]
     port   = db_config["port"]
     dbname = db_config["dbname"]
-    user   = db_config["user"]
+
+    # Use the first layer's SRID as project CRS (fallback to 4326)
+    project_srid = layers[0]["geometry"]["srid"] if layers else 4326
 
     layer_elements = []
     legend_layers  = []
@@ -1586,11 +1600,11 @@ def generate_qgs(schema: dict, db_config: dict) -> str:
         f'<qgis projectname="{dbname}" version="3.28.0-Firenze">\n'
         '  <projectCrs>\n'
         '    <spatialrefsys>\n'
-        '      <authid>EPSG:4326</authid>\n'
+        f'      <authid>EPSG:{project_srid}</authid>\n'
         '    </spatialrefsys>\n'
         '  </projectCrs>\n'
         '  <mapcanvas annotationsVisible="1" name="theMapCanvas">\n'
-        '    <units>degrees</units>\n'
+        f'    <units>{"degrees" if project_srid == 4326 else "meters"}</units>\n'
         '    <extent>\n'
         '      <xmin>-180</xmin>\n'
         '      <ymin>-90</ymin>\n'
@@ -1600,7 +1614,7 @@ def generate_qgs(schema: dict, db_config: dict) -> str:
         '    <rotation>0</rotation>\n'
         '    <destinationsrs>\n'
         '      <spatialrefsys>\n'
-        '        <authid>EPSG:4326</authid>\n'
+        f'        <authid>EPSG:{project_srid}</authid>\n'
         '      </spatialrefsys>\n'
         '    </destinationsrs>\n'
         '    <rendermaptile>0</rendermaptile>\n'
@@ -1779,6 +1793,716 @@ def generate_pyt(schema: dict, db_config: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Blender (bpy) generator
+# ---------------------------------------------------------------------------
+
+def generate_blender(schema: dict, db_config: dict) -> str:
+    """Generate a Blender Python script that loads PostGIS layers as 3D meshes.
+
+    Polygon layers are extruded into proper 3D buildings with walls and roof
+    geometry via bmesh.  When an address-indexed photo directory is available,
+    facade photos are applied as textures to matched buildings via spatial join
+    to the addresses table.  Unmatched buildings get procedural brick/concrete
+    materials.  Point layers become ico-spheres, line layers become curves.
+    Coordinates are centred to avoid floating-point issues.
+    """
+    host, port = db_config["host"], db_config["port"]
+    dbname, user = db_config["dbname"], db_config["user"]
+    password = db_config.get("password", "")
+    layers = schema["layers"]
+
+    # Detect if any layer has height columns (3D massing data)
+    height_columns = [
+        "MAX_HEIGHT", "max_height", "AVG_HEIGHT", "avg_height",
+        "HEIGHT", "height", "BLDG_HT", "bldg_ht",
+        "HEIGHT_MSL", "height_msl", "ELEVATION", "elevation",
+    ]
+
+    lines = [
+        f'"""',
+        f'Auto-generated Blender Python (bpy) script — Realistic 3D Buildings',
+        f'Database : {dbname} @ {host}:{port}',
+        f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}',
+        f'Layers   : {len(layers)}',
+        f'',
+        f'Features:',
+        f'  - 3D extruded buildings with walls and roof geometry',
+        f'  - Photo facade textures from HCD photos (address-matched)',
+        f'  - Procedural brick/concrete for unmatched buildings',
+        f'  - Road network as ground curves',
+        f'  - Sun lighting and camera setup',
+        f'',
+        f'Usage:',
+        f'  blender --python <this_file>.py          # opens Blender with scene',
+        f'  blender --background --python <this_file>.py  # headless',
+        f'',
+        f'Requires: psycopg2-binary in Blender Python',
+        f'"""',
+        f'',
+        f'import bpy',
+        f'import bmesh',
+        f'import math',
+        f'import os',
+        f'import sys',
+        f'import csv',
+        f'import site',
+        f'from mathutils import Vector',
+        f'',
+        f'# Ensure user site-packages is on path (Blender disables it by default)',
+        f'_user_site = site.getusersitepackages()',
+        f'if _user_site not in sys.path:',
+        f'    sys.path.append(_user_site)',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Configuration',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'DB_HOST     = "{host}"',
+        f'DB_PORT     = {port}',
+        f'DB_NAME     = "{dbname}"',
+        f'DB_USER     = "{user}"',
+        f'DB_PASSWORD = os.environ.get("PGPASSWORD", "{password}")',
+        f'',
+        f'# Photo directory (HCD heritage photos indexed by address)',
+        f'PHOTO_DIR   = r"F:\\06_Images & Graphics\\hcd_photos"',
+        f'PHOTO_INDEX = os.path.join(PHOTO_DIR, "_photo_index.csv")',
+        f'',
+        f'try:',
+        f'    import psycopg2',
+        f'except ImportError:',
+        f'    print("[ERROR] psycopg2 not available. Install into Blender Python:")',
+        f'    print("        <blender_python> -m pip install psycopg2-binary")',
+        f'    sys.exit(1)',
+        f'',
+        f'conn = psycopg2.connect(',
+        f'    host=DB_HOST, port=DB_PORT, dbname=DB_NAME,',
+        f'    user=DB_USER, password=DB_PASSWORD,',
+        f')',
+        f'cur = conn.cursor()',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# WKT parsing',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'def parse_wkt_polygon(wkt):',
+        f'    """Parse WKT POLYGON/MULTIPOLYGON -> list of rings [(x,y,z), ...]."""',
+        f'    rings = []',
+        f'    wkt = wkt.strip()',
+        f'    for prefix in ("MULTIPOLYGON", "POLYGON"):',
+        f'        if wkt.upper().startswith(prefix):',
+        f'            wkt = wkt[len(prefix):].strip()',
+        f'            break',
+        f'    if wkt.startswith("Z"):',
+        f'        wkt = wkt[1:].strip()',
+        f'    wkt = wkt.strip("()")',
+        f'    for part in wkt.split("),("):',
+        f'        part = part.strip().strip("()")',
+        f'        coords = []',
+        f'        for pt in part.split(","):',
+        f'            vals = pt.strip().split()',
+        f'            x, y = float(vals[0]), float(vals[1])',
+        f'            z = float(vals[2]) if len(vals) > 2 else 0.0',
+        f'            coords.append((x, y, z))',
+        f'        if coords:',
+        f'            rings.append(coords)',
+        f'    return rings',
+        f'',
+        f'',
+        f'def parse_wkt_line(wkt):',
+        f'    """Parse WKT LINESTRING/MULTILINESTRING -> list of (x,y,z)."""',
+        f'    wkt = wkt.strip()',
+        f'    for prefix in ("MULTILINESTRING", "LINESTRING"):',
+        f'        if wkt.upper().startswith(prefix):',
+        f'            wkt = wkt[len(prefix):].strip()',
+        f'            break',
+        f'    if wkt.startswith("Z"):',
+        f'        wkt = wkt[1:].strip()',
+        f'    wkt = wkt.strip("()")',
+        f'    coords = []',
+        f'    for pt in wkt.split(","):',
+        f'        vals = pt.strip().split()',
+        f'        x, y = float(vals[0]), float(vals[1])',
+        f'        z = float(vals[2]) if len(vals) > 2 else 0.0',
+        f'        coords.append((x, y, z))',
+        f'    return coords',
+        f'',
+        f'',
+        f'def parse_wkt_point(wkt):',
+        f'    """Parse WKT POINT/MULTIPOINT -> (x,y,z)."""',
+        f'    wkt = wkt.strip()',
+        f'    for prefix in ("MULTIPOINT", "POINT"):',
+        f'        if wkt.upper().startswith(prefix):',
+        f'            wkt = wkt[len(prefix):].strip()',
+        f'            break',
+        f'    if wkt.startswith("Z"):',
+        f'        wkt = wkt[1:].strip()',
+        f'    wkt = wkt.strip("()")',
+        f'    vals = wkt.split(",")[0].strip().split()',
+        f'    return (float(vals[0]), float(vals[1]),',
+        f'            float(vals[2]) if len(vals) > 2 else 0.0)',
+        f'',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Material helpers',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'def make_color_material(name, r, g, b, roughness=0.7):',
+        f'    """Flat color PBR material."""',
+        f'    mat = bpy.data.materials.new(name=name)',
+        f'    mat.use_nodes = True',
+        f'    bsdf = mat.node_tree.nodes["Principled BSDF"]',
+        f'    bsdf.inputs["Base Color"].default_value = (r, g, b, 1.0)',
+        f'    bsdf.inputs["Roughness"].default_value = roughness',
+        f'    return mat',
+        f'',
+        f'',
+        f'def make_brick_material(name, base_r=0.45, base_g=0.22, base_b=0.12):',
+        f'    """Procedural brick material with mortar, weathering, and bump."""',
+        f'    mat = bpy.data.materials.new(name=name)',
+        f'    mat.use_nodes = True',
+        f'    nodes = mat.node_tree.nodes',
+        f'    links = mat.node_tree.links',
+        f'    bsdf = nodes["Principled BSDF"]',
+        f'    # Texture coordinate',
+        f'    tex_coord = nodes.new("ShaderNodeTexCoord")',
+        f'    # Brick texture',
+        f'    brick = nodes.new("ShaderNodeTexBrick")',
+        f'    brick.inputs["Color1"].default_value = (base_r, base_g, base_b, 1.0)',
+        f'    brick.inputs["Color2"].default_value = (base_r*0.85, base_g*0.85, base_b*0.85, 1.0)',
+        f'    brick.inputs["Mortar"].default_value = (0.75, 0.73, 0.70, 1.0)',
+        f'    brick.inputs["Scale"].default_value = 6.0',
+        f'    brick.inputs["Mortar Size"].default_value = 0.012',
+        f'    links.new(tex_coord.outputs["Object"], brick.inputs["Vector"])',
+        f'    # Weathering noise overlay',
+        f'    noise = nodes.new("ShaderNodeTexNoise")',
+        f'    noise.inputs["Scale"].default_value = 12.0',
+        f'    noise.inputs["Detail"].default_value = 6.0',
+        f'    mix = nodes.new("ShaderNodeMixRGB")',
+        f'    mix.blend_type = "MULTIPLY"',
+        f'    mix.inputs["Fac"].default_value = 0.2',
+        f'    links.new(brick.outputs["Color"], mix.inputs["Color1"])',
+        f'    links.new(noise.outputs["Color"], mix.inputs["Color2"])',
+        f'    links.new(mix.outputs["Color"], bsdf.inputs["Base Color"])',
+        f'    # Bump from brick pattern',
+        f'    bump = nodes.new("ShaderNodeBump")',
+        f'    bump.inputs["Strength"].default_value = 0.15',
+        f'    links.new(brick.outputs["Fac"], bump.inputs["Height"])',
+        f'    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])',
+        f'    bsdf.inputs["Roughness"].default_value = 0.85',
+        f'    return mat',
+        f'',
+        f'',
+        f'def make_photo_material(name, image_path):',
+        f'    """Material with photo texture + subtle weathering for facades."""',
+        f'    mat = bpy.data.materials.new(name=name)',
+        f'    mat.use_nodes = True',
+        f'    nodes = mat.node_tree.nodes',
+        f'    links = mat.node_tree.links',
+        f'    bsdf = nodes["Principled BSDF"]',
+        f'    # Load image',
+        f'    img = bpy.data.images.load(image_path)',
+        f'    tex_node = nodes.new("ShaderNodeTexImage")',
+        f'    tex_node.image = img',
+        f'    tex_node.projection = "BOX"',
+        f'    tex_node.projection_blend = 0.3',
+        f'    # Texture coordinate (Object) for box projection',
+        f'    tex_coord = nodes.new("ShaderNodeTexCoord")',
+        f'    # Mapping node to scale texture to building size',
+        f'    mapping = nodes.new("ShaderNodeMapping")',
+        f'    mapping.inputs["Scale"].default_value = (0.06, 0.06, 0.06)',
+        f'    links.new(tex_coord.outputs["Object"], mapping.inputs["Vector"])',
+        f'    links.new(mapping.outputs["Vector"], tex_node.inputs["Vector"])',
+        f'    # Mix photo with subtle noise for weathering',
+        f'    noise = nodes.new("ShaderNodeTexNoise")',
+        f'    noise.inputs["Scale"].default_value = 15.0',
+        f'    noise.inputs["Detail"].default_value = 4.0',
+        f'    mix = nodes.new("ShaderNodeMixRGB")',
+        f'    mix.blend_type = "MULTIPLY"',
+        f'    mix.inputs["Fac"].default_value = 0.15  # subtle weathering',
+        f'    links.new(tex_node.outputs["Color"], mix.inputs["Color1"])',
+        f'    links.new(noise.outputs["Color"], mix.inputs["Color2"])',
+        f'    links.new(mix.outputs["Color"], bsdf.inputs["Base Color"])',
+        f'    # Slight bump from noise for surface detail',
+        f'    bump = nodes.new("ShaderNodeBump")',
+        f'    bump.inputs["Strength"].default_value = 0.1',
+        f'    links.new(noise.outputs["Fac"], bump.inputs["Height"])',
+        f'    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])',
+        f'    bsdf.inputs["Roughness"].default_value = 0.75',
+        f'    return mat',
+        f'',
+        f'',
+        f'def make_ground_material():',
+        f'    """Dark asphalt ground plane material."""',
+        f'    mat = bpy.data.materials.new(name="ground_asphalt")',
+        f'    mat.use_nodes = True',
+        f'    bsdf = mat.node_tree.nodes["Principled BSDF"]',
+        f'    bsdf.inputs["Base Color"].default_value = (0.15, 0.15, 0.15, 1.0)',
+        f'    bsdf.inputs["Roughness"].default_value = 0.95',
+        f'    return mat',
+        f'',
+        f'',
+        f'def make_road_material():',
+        f'    """Road surface material."""',
+        f'    mat = bpy.data.materials.new(name="road_surface")',
+        f'    mat.use_nodes = True',
+        f'    bsdf = mat.node_tree.nodes["Principled BSDF"]',
+        f'    bsdf.inputs["Base Color"].default_value = (0.25, 0.25, 0.25, 1.0)',
+        f'    bsdf.inputs["Roughness"].default_value = 0.9',
+        f'    return mat',
+        f'',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Building mesh construction',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'def make_roof_material():',
+        f'    """Dark shingle roof material."""',
+        f'    mat = bpy.data.materials.new(name="roof_shingle")',
+        f'    mat.use_nodes = True',
+        f'    nodes = mat.node_tree.nodes',
+        f'    links = mat.node_tree.links',
+        f'    bsdf = nodes["Principled BSDF"]',
+        f'    # Noise texture for shingle variation',
+        f'    noise = nodes.new("ShaderNodeTexNoise")',
+        f'    noise.inputs["Scale"].default_value = 50.0',
+        f'    noise.inputs["Detail"].default_value = 8.0',
+        f'    # Color ramp for dark grey variation',
+        f'    ramp = nodes.new("ShaderNodeValToRGB")',
+        f'    ramp.color_ramp.elements[0].position = 0.3',
+        f'    ramp.color_ramp.elements[0].color = (0.12, 0.12, 0.13, 1.0)',
+        f'    ramp.color_ramp.elements[1].position = 0.7',
+        f'    ramp.color_ramp.elements[1].color = (0.22, 0.21, 0.20, 1.0)',
+        f'    links.new(noise.outputs["Fac"], ramp.inputs["Fac"])',
+        f'    links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])',
+        f'    bsdf.inputs["Roughness"].default_value = 0.9',
+        f'    return mat',
+        f'',
+        f'roof_mat = make_roof_material()',
+        f'',
+        f'',
+        f'def build_extruded_building(name, ring, height, collection, wall_material):',
+        f'    """Create a 3D building with floor, walls, and roof.',
+        f'    ring: list of (x, y) tuples (already offset-adjusted)',
+        f'    height: extrusion height in meters',
+        f'    Returns the Blender object or None.',
+        f'    """',
+        f'    if len(ring) < 3:',
+        f'        return None',
+        f'    # Remove closing vert if duplicated',
+        f'    if ring[0] == ring[-1]:',
+        f'        ring = ring[:-1]',
+        f'    if len(ring) < 3:',
+        f'        return None',
+        f'    n = len(ring)',
+        f'    mesh = bpy.data.meshes.new(name)',
+        f'    bm = bmesh.new()',
+        f'    # Bottom verts (z=0)',
+        f'    bot = [bm.verts.new((p[0], p[1], 0.0)) for p in ring]',
+        f'    # Top verts (z=height)',
+        f'    top = [bm.verts.new((p[0], p[1], height)) for p in ring]',
+        f'    bm.verts.ensure_lookup_table()',
+        f'    # Floor face (material slot 0 = wall)',
+        f'    try:',
+        f'        bm.faces.new(bot)',
+        f'    except ValueError:',
+        f'        bm.free()',
+        f'        return None',
+        f'    # Roof face (material slot 1 = roof)',
+        f'    try:',
+        f'        rf = bm.faces.new(list(reversed(top)))',
+        f'        rf.material_index = 1',
+        f'    except ValueError:',
+        f'        pass',
+        f'    # Wall faces (material slot 0 = wall)',
+        f'    for i in range(n):',
+        f'        j = (i + 1) % n',
+        f'        try:',
+        f'            bm.faces.new([bot[i], bot[j], top[j], top[i]])',
+        f'        except ValueError:',
+        f'            pass',
+        f'    # Recalculate normals to face outward',
+        f'    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)',
+        f'    bm.to_mesh(mesh)',
+        f'    bm.free()',
+        f'    mesh.update()',
+        f'    obj = bpy.data.objects.new(name, mesh)',
+        f'    collection.objects.link(obj)',
+        f'    # Slot 0: wall material, Slot 1: roof material',
+        f'    obj.data.materials.append(wall_material)',
+        f'    obj.data.materials.append(roof_mat)',
+        f'    # Smooth shading for walls',
+        f'    obj.data.shade_smooth()',
+        f'    return obj',
+        f'',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Scene setup',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'# Clear default scene',
+        f'bpy.ops.object.select_all(action="SELECT")',
+        f'bpy.ops.object.delete(use_global=False)',
+        f'',
+        f'# Set render engine to Eevee for fast preview',
+        f'for _engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):',
+        f'    try:',
+        f'        bpy.context.scene.render.engine = _engine',
+        f'        break',
+        f'    except TypeError:',
+        f'        continue',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Load photo index (address -> image path)',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'photo_map = {{}}  # address -> full image path',
+        f'if os.path.exists(PHOTO_INDEX):',
+        f'    with open(PHOTO_INDEX, encoding="utf-8") as f:',
+        f'        reader = csv.reader(f)',
+        f'        next(reader)  # skip header',
+        f'        for row in reader:',
+        f'            addr, filename = row[0], row[1]',
+        f'            full_path = os.path.join(PHOTO_DIR, filename)',
+        f'            if os.path.exists(full_path):',
+        f'                photo_map[addr.lower()] = full_path',
+        f'    print(f"[OK] Loaded {{len(photo_map)}} photo mappings")',
+        f'else:',
+        f'    print("[warn] No photo index found, using procedural textures only")',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Compute centroid offset from first layer to avoid float precision issues',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+    ]
+
+    # Emit centroid offset — prefer study area centre so clipped features land near origin
+    if layers:
+        first = layers[0]
+        fgeom_col = first["geometry"]["column"]
+        fsrid = first["geometry"].get("srid", 4326)
+        fschema = first["schema"]
+        ftable = first["table"]
+        lines += [
+            f'# Use study area centre if available, else first-layer centroid',
+            f'try:',
+            f'    cur.execute("""',
+            f'        SELECT ST_X(ST_Centroid(ST_Transform(ST_Union(geometry), {fsrid}))),',
+            f'               ST_Y(ST_Centroid(ST_Transform(ST_Union(geometry), {fsrid})))',
+            f'        FROM opendata.study_area',
+            f'    """)',
+            f'    _sa = cur.fetchone()',
+            f'    OFFSET_X, OFFSET_Y = _sa[0], _sa[1]',
+            f'except Exception:',
+            f'    conn.rollback()',
+            f'    cur.execute(\'SELECT ST_X(ST_Centroid("{fgeom_col}")), ST_Y(ST_Centroid("{fgeom_col}")) '
+            f'FROM "{fschema}"."{ftable}" LIMIT 500\')',
+            f'    _centroids = cur.fetchall()',
+            f'    OFFSET_X = sum(r[0] for r in _centroids) / len(_centroids) if _centroids else 0.0',
+            f'    OFFSET_Y = sum(r[1] for r in _centroids) / len(_centroids) if _centroids else 0.0',
+            f'print(f"[OK] Centroid offset: ({{OFFSET_X:.1f}}, {{OFFSET_Y:.1f}})")',
+            f'',
+        ]
+    else:
+        lines += [
+            f'OFFSET_X = 0.0',
+            f'OFFSET_Y = 0.0',
+            f'',
+        ]
+
+    # Colour palette for procedural brick variations
+    brick_palette = [
+        (0.45, 0.22, 0.12),  # classic red brick
+        (0.55, 0.35, 0.20),  # warm brown brick
+        (0.40, 0.38, 0.35),  # grey stone
+        (0.60, 0.55, 0.45),  # sandstone
+        (0.35, 0.18, 0.10),  # dark red brick
+        (0.50, 0.48, 0.42),  # light grey
+    ]
+
+    for i, layer in enumerate(layers):
+        var = safe_var(layer["table"])
+        table = layer["table"]
+        schema_name = layer["schema"]
+        geom = layer["geometry"]
+        geom_type = geom["type"].upper()
+        geom_col = geom["column"]
+        col_names = [c["name"] for c in layer["columns"]]
+
+        # Detect height column
+        ht_col = None
+        for hc in height_columns:
+            if hc in col_names:
+                ht_col = hc
+                break
+
+        is_point = "POINT" in geom_type
+        is_line = "LINE" in geom_type
+        is_poly = "POLYGON" in geom_type
+        # Handle generic "GEOMETRY" type: infer from height columns or default polygon
+        if not is_point and not is_line and not is_poly:
+            if ht_col or any(kw in table.lower() for kw in ("building", "massing", "footprint", "parcel")):
+                is_poly = True
+            else:
+                is_poly = True  # default to polygon for generic geometry
+
+        lines += [
+            f'# {"=" * 66}',
+            f'# Layer: {schema_name}.{table}  ({geom["type"]}, SRID {geom["srid"]})',
+            f'# {"=" * 66}',
+            f'',
+        ]
+
+        if is_poly:
+            # For polygon layers: spatial join to addresses for photo matching
+            select_cols = [f'ST_AsText(m."{geom_col}") AS _wkt']
+            if ht_col:
+                select_cols.append(f'm."{ht_col}"')
+            select_cols.append('a.address_full')
+            select_str = ", ".join(select_cols)
+
+            lines += [
+                f'print("[*] Loading {schema_name}.{table} with address matching ...")',
+                f'',
+                f'# Try to clip to study area if available, otherwise load all',
+                f'try:',
+                f'    cur.execute("SELECT 1 FROM opendata.study_area LIMIT 1")',
+                f'    _has_study_area = cur.fetchone() is not None',
+                f'except Exception:',
+                f'    conn.rollback()',
+                f'    _has_study_area = False',
+                f'',
+                f'if _has_study_area:',
+                f'    print("    Clipping to study area ...")',
+                f'    cur.execute("""',
+                f'        SELECT {select_str}',
+                f'        FROM "{schema_name}"."{table}" m',
+                f'        LEFT JOIN LATERAL (',
+                f'            SELECT a.address_full',
+                f'            FROM opendata.addresses a',
+                f'            WHERE ST_DWithin(ST_Transform(a.geom, {geom["srid"]}), m."{geom_col}", 15)',
+                f'            ORDER BY ST_Transform(a.geom, {geom["srid"]}) <-> m."{geom_col}"',
+                f'            LIMIT 1',
+                f'        ) a ON TRUE',
+                f'        WHERE ST_Intersects(m."{geom_col}",',
+                f'            ST_Transform((SELECT ST_Buffer(ST_Union(geometry), 100) FROM opendata.study_area), {geom["srid"]}))',
+                f'    """)',
+                f'else:',
+                f'    cur.execute("""',
+                f'        SELECT {select_str}',
+                f'        FROM "{schema_name}"."{table}" m',
+                f'        LEFT JOIN LATERAL (',
+                f'            SELECT a.address_full',
+                f'            FROM opendata.addresses a',
+                f'            WHERE ST_DWithin(ST_Transform(a.geom, {geom["srid"]}), m."{geom_col}", 15)',
+                f'            ORDER BY ST_Transform(a.geom, {geom["srid"]}) <-> m."{geom_col}"',
+                f'            LIMIT 1',
+                f'        ) a ON TRUE',
+                f'        LIMIT 50000',
+                f'    """)',
+                f'rows_{var} = cur.fetchall()',
+                f'print(f"    Loaded {{len(rows_{var})}} features")',
+                f'',
+            ]
+
+            lines += [
+                f'# Create collections',
+                f'col_textured = bpy.data.collections.new("{table}_textured")',
+                f'col_procedural = bpy.data.collections.new("{table}_procedural")',
+                f'bpy.context.scene.collection.children.link(col_textured)',
+                f'bpy.context.scene.collection.children.link(col_procedural)',
+                f'',
+                f'# Pre-create procedural brick materials',
+                f'brick_mats = [',
+            ]
+            for bi, (br, bg, bb) in enumerate(brick_palette):
+                lines.append(
+                    f'    make_brick_material("brick_{bi}", {br}, {bg}, {bb}),'
+                )
+            lines += [
+                f']',
+                f'',
+                f'# Cache for photo materials (avoid reloading same image)',
+                f'photo_mat_cache = {{}}',
+                f'textured_count = 0',
+                f'procedural_count = 0',
+                f'',
+                f'_total = len(rows_{var})',
+                f'_skipped = 0',
+                f'for _idx, _row in enumerate(rows_{var}):',
+                f'    if _idx % 100 == 0:',
+                f'        print(f"    Progress: {{_idx}}/{{_total}} buildings ...", end="\\r")',
+                f'    _wkt = _row[0]',
+            ]
+            if ht_col:
+                lines += [
+                    f'    _ht = float(_row[1]) if _row[1] is not None else 3.0',
+                    f'    _ht = max(_ht, 0.5)',
+                    f'    _addr = _row[2]',
+                ]
+            else:
+                lines += [
+                    f'    _ht = 3.0',
+                    f'    _addr = _row[1]',
+                ]
+            lines += [
+                f'    _rings = parse_wkt_polygon(_wkt)',
+                f'    if not _rings:',
+                f'        _skipped += 1',
+                f'        continue',
+                f'    # Use outer ring only; offset to scene centre',
+                f'    _ring = [(_p[0] - OFFSET_X, _p[1] - OFFSET_Y) for _p in _rings[0]]',
+                f'',
+                f'    # Check for photo match',
+                f'    _photo_path = None',
+                f'    if _addr:',
+                f'        _photo_path = photo_map.get(_addr.lower())',
+                f'',
+                f'    if _photo_path:',
+                f'        if _photo_path not in photo_mat_cache:',
+                f'            _mat_name = f"photo_{{os.path.basename(_photo_path)}}"',
+                f'            photo_mat_cache[_photo_path] = make_photo_material(_mat_name, _photo_path)',
+                f'        _mat = photo_mat_cache[_photo_path]',
+                f'        _col = col_textured',
+                f'        textured_count += 1',
+                f'    else:',
+                f'        _mat = brick_mats[_idx % len(brick_mats)]',
+                f'        _col = col_procedural',
+                f'        procedural_count += 1',
+                f'',
+                f'    _obj = build_extruded_building(f"{table}_{{_idx}}", _ring, _ht, _col, _mat)',
+                f'    if _obj and _addr:',
+                f'        _obj["address"] = _addr',
+                f'',
+                f'print(f"\\n    Buildings: {{textured_count}} photo-textured, {{procedural_count}} procedural, {{_skipped}} skipped")',
+                f'',
+            ]
+
+        elif is_point:
+            # Point layers (POIs etc.)
+            lines += [
+                f'print("[*] Loading {schema_name}.{table} (points) ...")',
+                f'cur.execute(\'SELECT ST_AsText("{geom_col}") FROM "{schema_name}"."{table}" LIMIT 10000\')',
+                f'rows_{var} = cur.fetchall()',
+                f'',
+                f'col_{var} = bpy.data.collections.new("{table}")',
+                f'bpy.context.scene.collection.children.link(col_{var})',
+                f'mat_{var} = make_color_material("mat_{table}", 0.9, 0.2, 0.2)',
+                f'',
+                f'for _idx, _row in enumerate(rows_{var}):',
+                f'    _pt = parse_wkt_point(_row[0])',
+                f'    _x = _pt[0] - OFFSET_X',
+                f'    _y = _pt[1] - OFFSET_Y',
+                f'    bpy.ops.mesh.primitive_ico_sphere_add(radius=1.5, location=(_x, _y, _pt[2]))',
+                f'    _obj = bpy.context.active_object',
+                f'    _obj.name = f"{table}_{{_idx}}"',
+                f'    col_{var}.objects.link(_obj)',
+                f'    bpy.context.scene.collection.objects.unlink(_obj)',
+                f'    _obj.data.materials.append(mat_{var})',
+                f'',
+                f'print(f"    Created {{len(rows_{var})}} point objects")',
+                f'',
+            ]
+
+        else:  # LINE (roads, cycling network, etc.)
+            lines += [
+                f'print("[*] Loading {schema_name}.{table} (lines) ...")',
+                f'cur.execute(\'SELECT ST_AsText("{geom_col}") FROM "{schema_name}"."{table}" LIMIT 20000\')',
+                f'rows_{var} = cur.fetchall()',
+                f'',
+                f'col_{var} = bpy.data.collections.new("{table}")',
+                f'bpy.context.scene.collection.children.link(col_{var})',
+                f'mat_{var} = make_road_material()',
+                f'',
+                f'for _idx, _row in enumerate(rows_{var}):',
+                f'    _pts = parse_wkt_line(_row[0])',
+                f'    if len(_pts) < 2:',
+                f'        continue',
+                f'    _curve = bpy.data.curves.new(f"{table}_{{_idx}}", "CURVE")',
+                f'    _curve.dimensions = "3D"',
+                f'    _spline = _curve.splines.new("POLY")',
+                f'    _spline.points.add(len(_pts) - 1)',
+                f'    for _j, _pt in enumerate(_pts):',
+                f'        _spline.points[_j].co = (_pt[0] - OFFSET_X, _pt[1] - OFFSET_Y, 0.2, 1.0)',
+                f'    _obj = bpy.data.objects.new(f"{table}_{{_idx}}", _curve)',
+                f'    _obj.data.bevel_depth = 3.0  # road width',
+                f'    _obj.data.bevel_resolution = 0',
+                f'    _obj.data.fill_mode = "FULL"',
+                f'    col_{var}.objects.link(_obj)',
+                f'    _obj.data.materials.append(mat_{var})',
+                f'',
+                f'print(f"    Created {{len(rows_{var})}} road segments")',
+                f'',
+            ]
+
+    # Ground plane + lighting + camera
+    lines += [
+        f'# ---------------------------------------------------------------------------',
+        f'# Ground plane',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'bpy.ops.mesh.primitive_plane_add(size=2000, location=(0, 0, -0.1))',
+        f'_ground = bpy.context.active_object',
+        f'_ground.name = "Ground"',
+        f'_ground.data.materials.append(make_ground_material())',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Lighting',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'# Main sun',
+        f'bpy.ops.object.light_add(type="SUN", location=(100, -100, 500))',
+        f'_sun = bpy.context.active_object',
+        f'_sun.name = "Sun"',
+        f'_sun.data.energy = 4.0',
+        f'_sun.rotation_euler = (math.radians(45), math.radians(15), math.radians(-30))',
+        f'',
+        f'# Ambient fill light',
+        f'bpy.ops.object.light_add(type="SUN", location=(-100, 100, 300))',
+        f'_fill = bpy.context.active_object',
+        f'_fill.name = "Fill"',
+        f'_fill.data.energy = 1.0',
+        f'_fill.rotation_euler = (math.radians(60), 0, math.radians(150))',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Camera',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'bpy.ops.object.camera_add(location=(150, -250, 200))',
+        f'cam = bpy.context.active_object',
+        f'cam.name = "Camera"',
+        f'cam.rotation_euler = (math.radians(55), 0, math.radians(25))',
+        f'cam.data.lens = 35',
+        f'bpy.context.scene.camera = cam',
+        f'',
+        f'# ---------------------------------------------------------------------------',
+        f'# Viewport setup',
+        f'# ---------------------------------------------------------------------------',
+        f'',
+        f'for area in bpy.context.screen.areas:',
+        f'    if area.type == "VIEW_3D":',
+        f'        for space in area.spaces:',
+        f'            if space.type == "VIEW_3D":',
+        f'                space.shading.type = "MATERIAL"',
+        f'                space.clip_end = 10000',
+        f'                break',
+        f'',
+        f'# Set world background to light sky blue',
+        f'world = bpy.data.worlds.get("World")',
+        f'if world and world.use_nodes:',
+        f'    bg = world.node_tree.nodes.get("Background")',
+        f'    if bg:',
+        f'        bg.inputs["Color"].default_value = (0.53, 0.69, 0.87, 1.0)',
+        f'        bg.inputs["Strength"].default_value = 0.8',
+        f'',
+        f'conn.close()',
+        f'print(f"[OK] Blender scene ready. {len(layers)} layer(s) loaded.")',
+        f'print("     Tip: Press Numpad 0 for camera view, Z for shading options")',
+    ]
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1843,8 +2567,8 @@ def main() -> None:
     # Apply layer filter
     if args.layers:
         schema["layers"] = [
-            l for l in schema["layers"]
-            if l["qualified_name"] in args.layers
+            ly for ly in schema["layers"]
+            if ly["qualified_name"] in args.layers
         ]
         schema["layer_count"] = len(schema["layers"])
         if not schema["layers"]:

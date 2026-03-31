@@ -206,7 +206,7 @@ def main() -> None:
 
     if args.schema_filter:
         result["layers"] = [
-            l for l in result["layers"] if l["schema"] == args.schema_filter
+            ly for ly in result["layers"] if ly["schema"] == args.schema_filter
         ]
         result["layer_count"] = len(result["layers"])
 

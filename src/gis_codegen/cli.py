@@ -26,48 +26,17 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from types import ModuleType
 
 from gis_codegen.extractor import connect, extract_schema
 from gis_codegen.generator import (
     generate_pyqgis, generate_arcpy,
     generate_folium, generate_kepler, generate_deck,
     generate_export, generate_qgs, generate_pyt,
+    generate_blender,
     VALID_OPERATIONS,
 )
 from gis_codegen.layout import TemplateConfig, CompositionLayout, MetadataOverlay
-
-
-# ---------------------------------------------------------------------------
-# TOML loader — stdlib tomllib (3.11+) with tomli fallback
-# ---------------------------------------------------------------------------
-
-def _load_toml_module() -> ModuleType | None:
-    try:
-        import tomllib
-        return tomllib
-    except ImportError:
-        pass
-    try:
-        import tomli as tomllib
-        return tomllib
-    except ImportError:
-        return None
-
-
-TOMLLIB = _load_toml_module()
-
-
-def load_toml(path: Path) -> dict:
-    if TOMLLIB is None:
-        print(
-            "[ERROR] TOML support requires Python 3.11+ or 'tomli' package.\n"
-            "        Install with: pip install tomli",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    with open(path, "rb") as f:
-        return TOMLLIB.load(f)
+from gis_codegen.utils import load_toml
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen = p.add_argument_group("generation options")
     gen.add_argument(
         "--platform",
-        choices=["pyqgis", "arcpy", "folium", "kepler", "deck", "export", "qgs", "pyt"],
+        choices=["pyqgis", "arcpy", "folium", "kepler", "deck", "export", "qgs", "pyt", "blender"],
         default=None,
         help="Target platform (required unless --list-layers).",
     )
@@ -256,6 +225,14 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument(
         "--layout", metavar="FILE", default=None,
         help="TOML composition layout file (layer selection + per-layer operations).",
+    )
+    gen.add_argument(
+        "--exclude-layer", metavar="SCHEMA.TABLE", action="append", dest="exclude_layers",
+        help="Exclude this layer from generation (repeatable).",
+    )
+    gen.add_argument(
+        "--launch-blender", action="store_true", default=False,
+        help="Auto-launch Blender with the generated script (blender platform only).",
     )
 
     # --- Preview ---
@@ -293,7 +270,7 @@ def main() -> None:
 
     # --list-layers: print summary and exit
     if args.list_layers:
-        col_w = max((len(l["qualified_name"]) for l in schema["layers"]), default=20)
+        col_w = max((len(ly["qualified_name"]) for ly in schema["layers"]), default=20)
         print(f"\n  {'LAYER':<{col_w}}  {'GEOM TYPE':<20}  {'SRID':<6}  ROWS (est.)")
         print(f"  {'-' * col_w}  {'-' * 20}  {'-' * 6}  ----------")
         for layer in schema["layers"]:
@@ -308,7 +285,7 @@ def main() -> None:
 
     # Filter by PostgreSQL schema
     if args.schema_filter:
-        schema["layers"] = [l for l in schema["layers"] if l["schema"] == args.schema_filter]
+        schema["layers"] = [ly for ly in schema["layers"] if ly["schema"] == args.schema_filter]
         schema["layer_count"] = len(schema["layers"])
         print(f"      After schema filter '{args.schema_filter}': "
               f"{schema['layer_count']} layer(s).", file=sys.stderr)
@@ -320,7 +297,7 @@ def main() -> None:
     # Filter by qualified table name
     if args.layers:
         schema["layers"] = [
-            l for l in schema["layers"] if l["qualified_name"] in args.layers
+            ly for ly in schema["layers"] if ly["qualified_name"] in args.layers
         ]
         schema["layer_count"] = len(schema["layers"])
         if not schema["layers"]:
@@ -368,7 +345,7 @@ def main() -> None:
 
     # Step 2: generate
     print(f"[2/2] Generating {platform} script ...", file=sys.stderr)
-    _no_op_platforms = {"folium", "kepler", "deck", "export", "qgs", "pyt"}
+    _no_op_platforms = {"folium", "kepler", "deck", "export", "qgs", "pyt", "blender"}
     if args.operations and platform in _no_op_platforms:
         print(f"[warn] --op flags are ignored for {platform}.",
               file=sys.stderr)
@@ -387,6 +364,7 @@ def main() -> None:
         "export":  lambda: generate_export(schema, db_config),
         "qgs":     lambda: generate_qgs(schema, db_config),
         "pyt":     lambda: generate_pyt(schema, db_config),
+        "blender": lambda: generate_blender(schema, db_config),
     }
     code = generators[platform]()
 
@@ -395,6 +373,28 @@ def main() -> None:
         print(f"[OK]  Written to {output_path}", file=sys.stderr)
     else:
         print(code)
+
+    # Auto-launch Blender with the generated script
+    if getattr(args, "launch_blender", False) and platform == "blender" and output_path:
+        import shutil
+        import subprocess
+        blender_exe = shutil.which("blender")
+        if not blender_exe:
+            for candidate in [
+                r"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe",
+                r"C:\Program Files\Blender Foundation\Blender 4.5\blender.exe",
+                r"C:\Program Files\Blender Foundation\Blender 4.4\blender.exe",
+            ]:
+                if Path(candidate).exists():
+                    blender_exe = candidate
+                    break
+        if blender_exe:
+            script_path = str(Path(output_path).resolve())
+            print(f"[3/3] Launching Blender: {blender_exe}", file=sys.stderr)
+            subprocess.Popen([blender_exe, "--python", script_path])
+        else:
+            print("[warn] Blender not found. Run manually:\n"
+                  f"       blender --python {output_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":
